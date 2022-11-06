@@ -1,6 +1,8 @@
 # minimum required CMAKE version
 CMAKE_MINIMUM_REQUIRED(VERSION 3.7 FATAL_ERROR)
 
+project(CompilerConstruction)
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # set compiler to 20
@@ -18,26 +20,48 @@ include_directories(${ANTLR4_INCLUDE_DIRS})
 
 # set variable pointing to the antlr tool that supports C++
 # this is not required if the jar file can be found under PATH environment
-set(ANTLR_EXECUTABLE ${CMAKE_CURRENT_SOURCE_DIR}/bin/antlr-4.11.1-complete.jar)
+set(ANTLR_EXECUTABLE ${CMAKE_CURRENT_SOURCE_DIR}/Antlr/antlr-4.11.1-complete.jar)
 
 # add macros to generate ANTLR Cpp code from grammar
 find_package(ANTLR REQUIRED)
 
 # Call macro to add lexer and grammar to your build dependencies.
-antlr_target(SampleGrammarLexer TLexer.g4 LEXER
-             PACKAGE antlrcpptest)
-antlr_target(SampleGrammarParser TParser.g4 PARSER VISITOR
-             PACKAGE antlrcpptest
-             DEPENDS_ANTLR SampleGrammarLexer
-             COMPILE_FLAGS -lib ${ANTLR_SampleGrammarLexer_OUTPUT_DIR})
-#antlr_target(SampleGrammarVisitor TParser.g4 VISITOR OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/libs/)
+# Two grammar files
+# antlr_target(SampleGrammarLexer Antlr/grammar/TLexer.g4 LEXER
+#              PACKAGE antlrcpptest)
+# antlr_target(SampleGrammarParser Antlr/grammar/TParser.g4 PARSER VISITOR
+#              PACKAGE antlrcpptest
+#              DEPENDS_ANTLR SampleGrammarLexer
+#              COMPILE_FLAGS -lib ${ANTLR_SampleGrammarLexer_OUTPUT_DIR})
+
+# One grammar file
+antlr_target(CricketGrammar Antlr/grammar/Cricket.g4 VISITOR
+             PACKAGE antlrcpp)
+             #COMPILE_FLAGS -lib ${ANTLR_CricketGrammar_OUTPUT_DIR})
 
 # include generated files in project environment
-include_directories(${ANTLR_SampleGrammarLexer_OUTPUT_DIR})
-include_directories(${ANTLR_SampleGrammarParser_OUTPUT_DIR})
+# Two grammar files
+#include_directories(${ANTLR_SampleGrammarLexer_OUTPUT_DIR})
+#include_directories(${ANTLR_SampleGrammarParser_OUTPUT_DIR})
 
-# add generated grammar to demo binary target
-add_executable(demo main.cpp
-               ${ANTLR_SampleGrammarLexer_CXX_OUTPUTS}
-               ${ANTLR_SampleGrammarParser_CXX_OUTPUTS})
-target_link_libraries(demo antlr4_static)
+# One grammar file
+include_directories(${ANTLR_CricketGrammar_OUTPUT_DIR})
+
+# Include main module
+file(GLOB compiler_SRC CONFIGURE_DEPENDS
+     "Src/*.h"
+     "Src/*.cpp"
+     "Src/Intermediate/*.h"
+     "Src/Intermediate/*.cpp"
+)
+
+# add generated grammar to compiler binary target
+add_executable(compiler ${compiler_SRC}
+                # Two grammar files
+               #${ANTLR_SampleGrammarLexer_CXX_OUTPUTS}
+               #${ANTLR_SampleGrammarParser_CXX_OUTPUTS}
+
+               # One grammar file
+               ${ANTLR_CricketGrammar_CXX_OUTPUTS}
+               )
+target_link_libraries(compiler antlr4_static)

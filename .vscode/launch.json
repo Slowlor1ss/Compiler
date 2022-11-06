@@ -15,15 +15,17 @@
     //     }
     // ]
     "configurations": [
+        
         {
             "name": "Debug ANTLR4 grammar",
             "type": "antlr-debug",
             "request": "launch",
             "input": "input.txt",
             //"grammar": "grammars/Example.g4",
-            "grammar": "TParser.g4",
+            //"grammar": "Antlr\\grammar\\C.g4",
+            "grammar": "Antlr\\grammar\\Cricket.g4",
             //"actionFile": "grammars/exampleActions.js",
-            "startRule": "main",
+            "startRule": "start",
             "printParseTree": true,
             "visualParseTree": true
         }

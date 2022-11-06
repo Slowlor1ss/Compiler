@@ -5,6 +5,7 @@ include(ExternalProject)
 set(ANTLR4_ROOT ${CMAKE_CURRENT_BINARY_DIR}/antlr4_runtime/src/antlr4_runtime)
 set(ANTLR4_INCLUDE_DIRS ${ANTLR4_ROOT}/runtime/Cpp/runtime/src)
 set(ANTLR4_GIT_REPOSITORY https://github.com/antlr/antlr4.git)
+SET(ANTLR4_ZIP_REPOSITORY ${PROJECT_SOURCE_DIR}/Antlr/antlr4-master.zip)
 if(NOT DEFINED ANTLR4_TAG)
   # Set to branch name to keep library updated at the cost of needing to rebuild after 'clean'
   # Set to commit hash to keep the build stable and does not need to rebuild after 'clean'
@@ -77,6 +78,7 @@ if(NOT DEFINED ANTLR4_WITH_STATIC_CRT)
 endif()
 
 if(ANTLR4_ZIP_REPOSITORY)
+  message(STATUS "Found antlr zip: ${ANTLR4_ZIP_REPOSITORY}")
   ExternalProject_Add(
       antlr4_runtime
       PREFIX antlr4_runtime
@@ -94,6 +96,7 @@ if(ANTLR4_ZIP_REPOSITORY)
       INSTALL_COMMAND ""
       EXCLUDE_FROM_ALL 1)
 else()
+  message(STATUS "Didn't find antlr zip using git repository ${ANTLR4_GIT_REPOSITORY}")
   ExternalProject_Add(
       antlr4_runtime
       PREFIX antlr4_runtime

@@ -5,6 +5,7 @@
 
 # build artifacts
 [Bb]uild/*
+input.txt
 
 # User-specific files
 *.rsuser
