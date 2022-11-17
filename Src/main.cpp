@@ -3,6 +3,8 @@
 #include "antlr4-runtime.h"
 #include "CricketLexer.h"
 #include "CricketParser.h"
+
+#include "Scope.h"
 #include "Intermediate/CodeGenVisitor.h"
 
 using namespace antlrcpp;

@@ -25,7 +25,7 @@
             //"grammar": "Antlr\\grammar\\C.g4",
             "grammar": "Antlr\\grammar\\Cricket.g4",
             //"actionFile": "grammars/exampleActions.js",
-            "startRule": "start",
+            "startRule": "body",//"start",
             "printParseTree": true,
             "visualParseTree": true
         }

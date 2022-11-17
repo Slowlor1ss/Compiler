@@ -1,12 +1,13 @@
-//a*(b+3);
+a*(b+3);
 
-void test()
-{
-    c+d;
-}
+//void test()
+//{
+//    c+d;
+//}
+//
+//int main()
+//{
+//    a+b;
+//    test();
+//}
 
-int main()
-{
-    a+b;
-    test();
-}
