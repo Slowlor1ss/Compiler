@@ -15,6 +15,7 @@ public:
 	enum class Operation {
 		//https://en.wikipedia.org/wiki/Function_prologue_and_epilogue
 		Prologue,
+		WriteConst,
 		ReadParam,
 		WriteParam,
 		Call,

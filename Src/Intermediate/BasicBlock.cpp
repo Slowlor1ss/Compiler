@@ -1,11 +1,11 @@
 #include "BasicBlock.h"
 #include "Instruction.h"
 
-BasicBlock::BasicBlock(ControlFlowGraph* cfg, std::string label)
+BasicBlock::BasicBlock(ControlFlowGraph* cfg, std::string label, Function* fn)
 	: m_CFG(cfg)
 	, m_Label(std::move(label))
+	, m_Function(fn)
 {
-	
 }
 
 BasicBlock::~BasicBlock()

@@ -1,5 +1,7 @@
 #pragma once
+#include <string>
 #include <vector>
+struct Function;
 class Scope;
 class BasicBlock;
 
@@ -9,7 +11,8 @@ public:
 	ControlFlowGraph(bool optimized = false);
 	~ControlFlowGraph();
 
-	BasicBlock* CreateNewCurrBB();
+	BasicBlock* CreateNewCurrBB(std::string name, Function* fn);
+	BasicBlock* CreateNewCurrBB(Function* fn);
 
 	bool GetOptimized() { return m_Optimized; }
 	void SetOptimized(bool o) { m_Optimized = o; }

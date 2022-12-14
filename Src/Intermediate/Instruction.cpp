@@ -1,6 +1,7 @@
 #include "Instruction.h"
 #include <cassert>
 #include <utility>
+#include "BasicBlock.h"
 
 
 //https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
@@ -132,14 +133,13 @@ void Instruction::Return(std::ostream& o)
 		else
 		{
 			int constValue;
-			const bool isChar = (param[0] == '\'');
-			const bool isInt = (param[0] == '$');
+			const bool isChar = m_BasicBlock->GetFunction()->returnType == "char";
 			if (isChar)
 			{
 				//only need to keep the value of the letter
 				constValue = static_cast<int>(param[1]);
 			}
-			else if (isInt)
+			else
 			{
 				//get value of the number
 				constValue = stoi(param.substr(1, param.size() - 1));

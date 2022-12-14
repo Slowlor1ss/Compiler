@@ -55,7 +55,7 @@ primaryExpr :
 	| primaryExpr LGEQ=(LessOrEqual|GreaterOrEqual) primaryExpr				#cmpEqualityLessGreaterExpr
     | primaryExpr BITWISE=(BitwiseAnd|BitwiseOr|BitwiseXor) primaryExpr     #BitwiseExpr
 	| Identifier OpenPar (primaryExpr (Comma primaryExpr)*)? ClosePar		#funcExpr
-	| Const 											                    #constExpr 
+	| CONST=(Number|CharLiteral) 											                    #constExpr 
 	| Identifier										                    #varExpr
 ;
 
@@ -105,7 +105,7 @@ flowControl :
 
 WS : [ \r\t\n] -> skip ;
 TReturn : 'return' ;
-Const : Number | CharLiteral ;
+//Const : Number | CharLiteral ;
 Number : Digit+ ; //+ is one or more of whats before the +
 //Digit : [0-9]+ ;
 CharLiteral : '\'' . '\'' ;

@@ -29,6 +29,7 @@ std::any CodeVisitor::visitProg(antlrcpp::CricketParser::ProgContext* ctx)
 	}
 
 	//TODO: maybe visit main first, do we make sure there's no other function that's called main in global scope
+	//TODO: probably shouldn't do the above as otherwise functions used inside main will be unknown HOWEVER maybe i should first go over the functions above main then main then functions under main
 	//visit main
 	visit(ctx->mainDeclr());
 
@@ -50,14 +51,14 @@ void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const
 		const std::string message = "No \"return\" found in non-void function \"" + functionName + "\" -> Defaulted to returning 0";
 		m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
 
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {"$0"}, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {"0"}, scope);
 		return;
 	}
 
 	// Add return instruction
 	if(functionName == "main" && m_CurrentFunction->returnType == "void")
 	{
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {"$0"}, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {"0"}, scope);
 	}
 	else
 	{
@@ -221,6 +222,7 @@ std::any CodeVisitor::visitFuncDeclrHeader(antlrcpp::CricketParser::FuncDeclrCon
 
 	// Add function in symbol table
 	Function* func = m_GlobalScope->AddFunc(funcName, returnType->toString(), numParams, paramTypes, paramNames, ctx->getStart()->getLine());
+	m_Cfg.CreateNewCurrBB(funcName, func);
 
 	return func;
 }
@@ -233,9 +235,8 @@ std::any CodeVisitor::visitBody(antlrcpp::CricketParser::BodyContext* ctx)
 
 	for (size_t i = 0; i < n; i++) 
 	{
-		if (!shouldVisitNextChild(ctx, result)) {
+		if (!shouldVisitNextChild(ctx, result))
 			break;
-		}
 
 		try
 		{
@@ -297,7 +298,8 @@ std::any CodeVisitor::visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAn
 	Symbol* result = std::any_cast<Symbol*>(visit(ctx->expr()));
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	if (result->varType == "void") {
+	if (result->varType == "void") 
+	{
 		const std::string message = std::format("{} void type assignment not supported", varName);
 		throw Unsupported_Expression(message, ctx->getStart()->getLine());
 	}
@@ -561,7 +563,53 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 
 std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+	Symbol* tmp;
+
+	switch (ctx->CONST->getType())
+	{
+	case CricketParser::Number:
+		//For now only support integer types
+		auto value = std::stoll(ctx->getText());
+		if (value > INT_MAX || value < INT_MIN)
+		{
+			value = static_cast<int>(value);
+			//Send a warning to inform the user
+			std::string message = "signed integral constant overflow '" + ctx->getText() + "' to '" + std::to_string(value) + "'";
+			m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
+		}
+
+		tmp = CreateTempSymbol(ctx, "int", new int(value));
+
+		// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
+		// can be usefull for looking at what instructions are happening
+		if (!m_Cfg.GetOptimized())
+			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, tmp->varName, { std::to_string(value) }, scope);
+
+		break;
+	case CricketParser::CharLiteral:
+		//// Remove the surrounding ' we also only need to get one char as its a char literal
+		////auto str = ctx->getText();
+		////str.erase(std::ranges::remove(str, '\'').begin(), str.end());
+		////auto charLiteral = str[0];
+		
+		// Do [1] to skip the surrounding '
+		const int charLiteralValue = ctx->getText()[1]; //TODO: test a char like: char c = '\''
+
+		tmp = CreateTempSymbol(ctx, "char", new int(charLiteralValue));
+
+		// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
+		// can be usefull for looking at what instructions are happening
+		if (!m_Cfg.GetOptimized())
+			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, tmp->varName, { std::to_string(charLiteralValue) }, scope);
+
+		break;
+	default:
+		throw Unsupported_Expression("Used unsupported literal type: " + ctx->CONST->toString() + ", expected 'int', or 'char'", ctx->getStart()->getLine());
+	}
+
+	// Return the temporary variable
+	return nullptr;
 }
 
 std::any CodeVisitor::visitVarExpr(antlrcpp::CricketParser::VarExprContext* ctx)

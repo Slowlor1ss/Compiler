@@ -24,7 +24,7 @@ int main(int argc, char* argv[])
 		//ANTLRInputStream input("b+c*d; (b+c)*d;");
 		//ANTLRInputStream input("void main()\n{\n\tint a = 2;\n\tint b = 3;\n\tint c = a + b;\n}");
 		//ANTLRInputStream input("int test()\n{\n    int b = 2;\n    int c = 3;\n    int d = c+d;\n    return d;\n}\n\nvoid main()\n{\n    test();\n}");
-		ANTLRInputStream input("void test()\n{\n    int b = 2;\n    int c = 3;\n    int d = c+d;\n    return;\n}\n\nvoid main()\n{\n    test();\n}");
+		ANTLRInputStream input("void test()\n{\n    char b = 'l';\n    int c = 3;\n    int d = c+d;\n    return;\n}\n\nvoid main()\n{\n    test();\n}");
 		std::cout << input.toString();
 		std::cout << "\n--------------------------\n";
 		CricketLexer lexer(&input);
