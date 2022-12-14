@@ -11,25 +11,16 @@ class SymbolTable
 public:
     SymbolTable();
 
-    void Init();
-
-    Scope* PushScope();
-
+    //Scope* PushScope();
+    Scope* PushScope(Scope* parentScope);
     void PopScope();
 
-	Scope* CurrentScope();
-    Scope* GetScope(int genId);
-
-    int NextGenId() {
-        m_GenId++;
-        return m_GenId;
-    }
-
-    std::string ToString();
+    Scope* CurrentScope() const { return m_SymbolTableStack.top(); }
+    Scope* GetGlobalScope() const { return m_GlobalScope; }
 
 private:
-    //TODO: maybe make stack
-    std::vector<Scope*> m_Scopes;
-    int m_GenId;
+    Scope* m_GlobalScope;
+    //This includes both the global symbol table and the scoped symbol tables
+    std::stack<Scope*> m_SymbolTableStack;
 };
 

@@ -1,32 +1,33 @@
 #pragma once
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-#include "Instruction.h"
+class ErrorLogger;
 class SymbolTable;
 
 struct Symbol
 {
-	std::string_view varName;
+	std::string varName;
 	int memoryOffset{};			// Its offset (in memory) to the base pointer 
-	std::string_view varType;		// The type of the variable
-	int varLine{};				// The line of code where the variable is declared
-	bool isUsed{};				// Sort of dirty flag checks whether the variable is used in the code
+	std::string varType;		// The type of the variable
+	size_t varLine{};				// The line of code where the variable is declared
+	bool isUsed{false};				// Sort of dirty flag checks whether the variable is used in the code
 	bool isCorrect{}; 			// False when a dummy struct is returned to avoid bad cast
 	bool noConst{};				// Tell if the variable can be set as a simple const
 	int* constPtr{};  			// Const pointer
 };
 
 struct Function {
-	std::string_view funcName;
-	std::string_view returnType;
-	int nbParameters;							// The number of input parameters
-	std::vector<std::string_view> parameterTypes;	// The type of every input parameter
-	std::vector<std::string_view> parameterNames; 	// The names of every parameter
-	int funcLine; 								// The line of code where the function is declared
-	bool isCalled;								// Sort of dirty flag checks whether the function is called used for optimazation later
+	std::string funcName;
+	std::string returnType;
+	size_t nbParameters;							// The number of input parameters
+	std::vector<std::string> parameterTypes;	// The type of every input parameter
+	std::vector<std::string> parameterNames; 	// The names of every parameter
+	size_t funcLine; 								// The line of code where the function is declared
+	bool isCalled{false};								// Sort of dirty flag checks whether the function is called used for optimazation later
 };
 
 class Scope
@@ -44,8 +45,8 @@ public:
 	Symbol* GetSymbol(const std::string& name);
 	Function* GetFunc(const std::string& name);
 
-	void AddSymbol(const Symbol& sym);
-	void AddFunc(const Function& fn);
+	Symbol* AddSymbol(const std::string& name, const std::string& varType, int varLine, int* constPtr = nullptr);
+	Function* AddFunc(const std::string& name, std::string retType, int nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, int funcLine);
 
 	const Scope* GetEnclosingScope() const;
 
@@ -55,7 +56,14 @@ public:
 	int GetStackPointer() const;
 	void SetStackPointer(int sP);
 
+	// Static Analysis
+	void CheckUnusedSymbols(ErrorLogger& errorLogger);
+	bool CheckFunctionRedefinition(const std::string& funcName, int lineNumber, ErrorLogger& errorLogger) const;
+	bool CheckSymbolRedefinition(const std::string& varName, int lineNumber, ErrorLogger& errorLogger) const;
+
 private:
+	Symbol* AddSymbol(const Symbol& sym);
+	Function* AddFunc(const Function& fn);
 
 	int m_StackPointer;
 	// Whether the scope has a return statement
@@ -64,10 +72,13 @@ private:
 	Scope* m_EnclosingScope;
 	std::vector<Scope*> m_ChildScopes;
 
-	std::unordered_map<std::string_view, Symbol> m_SymbolMap;
-	std::unordered_map<std::string_view, Function> m_FuncMap;
+	//Possible optimization could be using a std::string_view as key
+	//but as that's me just doing premature optimization and could cause undefined behaviour in a specific event ill leave it for now >:D
+	//Found a guy thinking the same as me: https://www.reddit.com/r/cpp_questions/comments/4hvtnr/stdunordered_map_and_stdstring_view/
+	std::unordered_map<std::string, Symbol> m_SymbolMap;
+	std::unordered_map<std::string, Function> m_FuncMap;
 
-	std::unordered_map<std::string_view, int> m_TypeSizes{ {"int", 4}, {"char", 1} };
+	std::map<std::string_view, int> m_TypeSizes{ {"int", 4}, {"char", 1} };
 
 };
 

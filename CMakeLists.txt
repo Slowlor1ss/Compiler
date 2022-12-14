@@ -48,15 +48,17 @@ antlr_target(CricketGrammar Antlr/grammar/Cricket.g4 VISITOR
 include_directories(${ANTLR_CricketGrammar_OUTPUT_DIR})
 
 # Include main module
-file(GLOB compiler_SRC CONFIGURE_DEPENDS
+file(GLOB compiler_SRC_General CONFIGURE_DEPENDS
      "Src/*.h"
      "Src/*.cpp"
+)
+file(GLOB compiler_SRC_Intermediate CONFIGURE_DEPENDS
      "Src/Intermediate/*.h"
      "Src/Intermediate/*.cpp"
 )
 
 # add generated grammar to compiler binary target
-add_executable(compiler ${compiler_SRC}
+add_executable(compiler ${compiler_SRC_General} ${compiler_SRC_Intermediate}
                 # Two grammar files
                #${ANTLR_SampleGrammarLexer_CXX_OUTPUTS}
                #${ANTLR_SampleGrammarParser_CXX_OUTPUTS}
@@ -64,4 +66,10 @@ add_executable(compiler ${compiler_SRC}
                # One grammar file
                ${ANTLR_CricketGrammar_CXX_OUTPUTS}
                )
+
+# add some filters in vs
+source_group("General"        FILES ${compiler_SRC_General})
+source_group("Intermediate"   FILES ${compiler_SRC_Intermediate})
+source_group("ANTLR"          FILES ${ANTLR_CricketGrammar_CXX_OUTPUTS})
+
 target_link_libraries(compiler antlr4_static)

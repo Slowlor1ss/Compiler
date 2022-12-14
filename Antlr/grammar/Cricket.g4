@@ -48,12 +48,12 @@ expr :
 primaryExpr :
 	OpenPar expr ClosePar 										            #parExpr
 	| UNARY=(Minus|ExclamationMark) primaryExpr 		   					#unaryExpr
-	| primaryExpr OP1=(Mul|Div|Mod) primaryExpr 						    #mulDivModExpr	
-	| primaryExpr OP2=(Plus|Minus) primaryExpr 						        #addSubExpr
+	| primaryExpr MULTIPLICATIVE=(Mul|Div|Mod) primaryExpr 					#mulDivModExpr	
+	| primaryExpr ADDITIVE=(Plus|Minus) primaryExpr 						#addSubExpr
 	| primaryExpr CMP=(LessThan | GreaterThan) primaryExpr			        #cmpLessOrGreaterExpr
 	| primaryExpr EQ=(Equal|NotEqual) primaryExpr							#cmpEqualityExpr
-	| primaryExpr EQLG=(LessOrEqual|GreaterOrEqual) primaryExpr				#cmpEqualityLessGreaterExpr
-    | primaryExpr EBW=(BitwiseAnd|BitwiseOr|BitwiseXor)                     #BitwiseExpr
+	| primaryExpr LGEQ=(LessOrEqual|GreaterOrEqual) primaryExpr				#cmpEqualityLessGreaterExpr
+    | primaryExpr BITWISE=(BitwiseAnd|BitwiseOr|BitwiseXor) primaryExpr     #BitwiseExpr
 	| Identifier OpenPar (primaryExpr (Comma primaryExpr)*)? ClosePar		#funcExpr
 	| Const 											                    #constExpr 
 	| Identifier										                    #varExpr

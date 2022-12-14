@@ -2,17 +2,26 @@
 #include "antlr4-runtime.h"
 #include "CricketBaseVisitor.h"
 
-class CodeGenVisitor final : public antlrcpp::CricketBaseVisitor
+struct Symbol;
+struct Function;
+class ControlFlowGraph;
+class ErrorLogger;
+class Scope;
+class SymbolTable;
+
+class CodeVisitor final : public antlrcpp::CricketBaseVisitor
 {
 public:
-	CodeGenVisitor() = default;
-	//~CodeGenVisitor() override;
+	CodeVisitor(ErrorLogger& errorHandeler, ControlFlowGraph& cfg);
+	//~CodeVisitor() override;
 
 	std::any visitProg(antlrcpp::CricketParser::ProgContext* ctx) override;
-	std::any visitVartype(antlrcpp::CricketParser::VartypeContext* ctx) override;
+	std::any visitFuncDeclr(antlrcpp::CricketParser::FuncDeclrContext* ctx) override;
 	std::any visitBeginBlock(antlrcpp::CricketParser::BeginBlockContext* ctx) override;
 	std::any visitEndBlock(antlrcpp::CricketParser::EndBlockContext* ctx) override;
-	std::any visitFuncDeclr(antlrcpp::CricketParser::FuncDeclrContext* ctx) override;
+	std::any visitBody(antlrcpp::CricketParser::BodyContext* ctx) override;
+	std::any visitVarDeclr(antlrcpp::CricketParser::VarDeclrContext* ctx) override;
+	std::any visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAndAssignContext* ctx) override;
 	std::any visitMainDeclrHeaderWithRet(antlrcpp::CricketParser::MainDeclrHeaderWithRetContext* ctx) override;
 	std::any visitMainDeclrHeaderNoRet(antlrcpp::CricketParser::MainDeclrHeaderNoRetContext* ctx) override;
 	std::any visitMainDeclr(antlrcpp::CricketParser::MainDeclrContext* ctx) override;
@@ -32,8 +41,6 @@ public:
 	std::any visitIfStatement(antlrcpp::CricketParser::IfStatementContext* ctx) override;
 	std::any visitElseStatement(antlrcpp::CricketParser::ElseStatementContext* ctx) override;
 	std::any visitWhileStatement(antlrcpp::CricketParser::WhileStatementContext* ctx) override;
-	std::any visitVarDeclr(antlrcpp::CricketParser::VarDeclrContext* ctx) override;
-	std::any visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAndAssignContext* ctx) override;
 	std::any visitExprReturn(antlrcpp::CricketParser::ExprReturnContext* ctx) override;
 	std::any visitEmptyReturn(antlrcpp::CricketParser::EmptyReturnContext* ctx) override;
 
@@ -45,8 +52,22 @@ public:
 
 private:
 	std::any visitFuncDeclrHeader(antlrcpp::CricketParser::FuncDeclrContext* ctx);
-	std::any visitFuncDeclrBody(antlrcpp::CricketParser::FuncDeclrContext* ctx);
 
+	void AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const;
+	//creates a temp symbol and adds it to the sym list of the current scope
+	Symbol* CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, int* constPtr = nullptr);
+	// Throws if one of the symbols has void as type
+	void CheckUnsupportedVoidType(const size_t lineNr, const std::initializer_list<Symbol*>& symbols) const;
+
+	int m_TempVarId{0};
+
+	ErrorLogger& m_ErrorLogger;
+	ControlFlowGraph& m_Cfg;
+
+	SymbolTable* m_GlobalSymbolTable;
+	Scope* m_GlobalScope;
+
+	Function* m_CurrentFunction{};
 };
 
 
