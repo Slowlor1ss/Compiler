@@ -330,21 +330,21 @@ std::any CodeVisitor::visitUnaryExpr(antlrcpp::CricketParser::UnaryExprContext* 
 	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var });
 
 	// Create a temp to hold the result of the unary expr
-	Symbol* tmp = CreateTempSymbol(ctx, var->varType);
+	Symbol* resultTemp = CreateTempSymbol(ctx, var->varType);
 
 	switch (ctx->UNARY->getType())
 	{
 	case CricketParser::ExclamationMark:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::NotEqual, tmp->varName, { var->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::NotEqual, resultTemp->varName, { var->varName }, scope);
 		break;
 	case CricketParser::Minus:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Negate, tmp->varName, { var->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Negate, resultTemp->varName, { var->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported unary type: " + ctx->UNARY->toString(), ctx->getStart()->getLine());
 	}
 
-	return tmp;
+	return resultTemp;
 }
 
 std::any CodeVisitor::visitMulDivModExpr(antlrcpp::CricketParser::MulDivModExprContext* ctx)
@@ -515,7 +515,6 @@ std::any CodeVisitor::visitBitwiseExpr(antlrcpp::CricketParser::BitwiseExprConte
 
 	return resultTemp;
 }
-
 // Function call
 std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ctx)
 {
@@ -524,9 +523,8 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 	std::string funcName = ctx->Identifier()->getText();
 
 	// Check if function exists
-	if (!m_GlobalScope->HasFunc(funcName)) {
+	if (!m_GlobalScope->HasFunc(funcName))
 		throw Unknown_FunctionCall(funcName, ctx->getStart()->getLine());
-	}
 
 	Function* func = m_GlobalScope->GetFunc(funcName);
 
@@ -554,17 +552,17 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 	}
 
 	// Create instruction for the function call
-	Symbol* tmp = CreateTempSymbol(ctx, func->returnType);
-	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Call, tmp->varName, { funcName, std::to_string(numParams) }, scope);
+	Symbol* resultTemp = CreateTempSymbol(ctx, func->returnType);
+	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Call, resultTemp->varName, { funcName, std::to_string(numParams) }, scope);
 	func->isCalled = true;
 
-	return tmp;
+	return resultTemp;
 }
-
+// Literals
 std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* ctx)
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
-	Symbol* tmp;
+	Symbol* resultTemp;
 
 	switch (ctx->CONST->getType())
 	{
@@ -579,12 +577,12 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 			m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
 		}
 
-		tmp = CreateTempSymbol(ctx, "int", new int(value));
+		resultTemp = CreateTempSymbol(ctx, "int", new int(value));
 
 		// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 		// can be usefull for looking at what instructions are happening
 		if (!m_Cfg.GetOptimized())
-			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, tmp->varName, { std::to_string(value) }, scope);
+			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, resultTemp->varName, { std::to_string(value) }, scope);
 
 		break;
 	case CricketParser::CharLiteral:
@@ -596,25 +594,35 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 		// Do [1] to skip the surrounding '
 		const int charLiteralValue = ctx->getText()[1]; //TODO: test a char like: char c = '\''
 
-		tmp = CreateTempSymbol(ctx, "char", new int(charLiteralValue));
+		resultTemp = CreateTempSymbol(ctx, "char", new int(charLiteralValue));
 
 		// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 		// can be usefull for looking at what instructions are happening
 		if (!m_Cfg.GetOptimized())
-			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, tmp->varName, { std::to_string(charLiteralValue) }, scope);
+			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, resultTemp->varName, { std::to_string(charLiteralValue) }, scope);
 
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported literal type: " + ctx->CONST->toString() + ", expected 'int', or 'char'", ctx->getStart()->getLine());
 	}
 
-	// Return the temporary variable
-	return nullptr;
+	return resultTemp;
 }
 
 std::any CodeVisitor::visitVarExpr(antlrcpp::CricketParser::VarExprContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+
+	const std::string varName = ctx->Identifier()->getText();
+	// Check if symbol exists
+	if (!scope->HasSymbol(varName))
+		throw Unknown_Symbol(varName, ctx->getStart()->getLine());
+
+	// Set it to used for compiler optimizations later
+	auto sym = scope->GetSymbol(varName);
+	sym->isUsed = true;
+
+	return sym;
 }
 
 #pragma endregion PrimaryExpr
