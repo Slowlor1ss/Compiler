@@ -22,8 +22,7 @@ funcDeclr :
 //# are labels 
 //TODO: maybe add -> int main (int argc, char *argv[]);
 mainDeclrHeader:
-	FTYPE=(TVoid|TInt) 'main' OpenPar (TVoid)? ClosePar 		 		    #mainDeclrHeaderWithRet
-	| 'main' OpenPar (TVoid)? ClosePar 									    #mainDeclrHeaderNoRet
+	FTYPE=(TVoid|TInt) 'main' OpenPar (TVoid)? ClosePar
 ;
 
 mainDeclr : 
@@ -55,7 +54,7 @@ primaryExpr :
 	| primaryExpr LGEQ=(LessOrEqual|GreaterOrEqual) primaryExpr				#cmpEqualityLessGreaterExpr
     | primaryExpr BITWISE=(BitwiseAnd|BitwiseOr|BitwiseXor) primaryExpr     #BitwiseExpr
 	| Identifier OpenPar (primaryExpr (Comma primaryExpr)*)? ClosePar		#funcExpr
-	| CONST=(Number|CharLiteral) 											                    #constExpr 
+	| CONST=(Number|CharLiteral) 											#constExpr 
 	| Identifier										                    #varExpr
 ;
 

@@ -62,7 +62,7 @@ void Instruction::GenerateASM(std::ostream& o)
 		DefaultNotImplementedOperation();
 		break;
 	case Operation::Assign:
-		DefaultNotImplementedOperation();
+		Assign(o);
 		break;
 	case Operation::Plus:
 		DefaultNotImplementedOperation();
@@ -120,13 +120,11 @@ void Instruction::Return(std::ostream& o)
 			Symbol* s1 = m_Scope->GetSymbol(param);
 			if (s1->constPtr)
 			{
-				o	<< "	movl	$" << *s1->constPtr << ", %eax"
-					<< "		# [ret] load " << *s1->constPtr << " into %eax\n";
+				o << "	movl	$" << *s1->constPtr << ", %eax";
 			}
 			else
 			{
-				o	<< "	movl	" << s1->memoryOffset << "(%rbp), %eax"
-					<< "		# [ret] load " << param << " into %eax\n\n";
+				o << "	movl	" << s1->memoryOffset << "(%rbp), %eax";
 			}
 		}
 		// If we're returning a const
@@ -145,8 +143,7 @@ void Instruction::Return(std::ostream& o)
 				constValue = stoi(param.substr(1, param.size() - 1));
 			}
 
-			o << "	movl	$" << constValue << ", %eax"
-			  << "		# [ret] load " << constValue << " into %eax\n\n";
+			o << "	movl	$" << constValue << ", %eax";
 		}
 	}
 
@@ -154,4 +151,14 @@ void Instruction::Return(std::ostream& o)
 	//https://stackoverflow.com/questions/4584089/what-is-the-function-of-the-push-pop-instructions-used-on-registers-in-x86-ass
 	o << "	popq	%rbp\n";
 	o << "	ret\n";
+}
+
+void Instruction::Assign(std::ostream& o)
+{
+	Symbol* dest = m_Scope->GetSymbol(m_Dest);
+	Symbol* source = m_Scope->GetSymbol(m_Params.at(0));
+
+	o << " movl " << source->memoryOffset << "(%rbp), %eax";
+	o << " movl %eax, " << dest->memoryOffset << "(%rbp)";
+
 }

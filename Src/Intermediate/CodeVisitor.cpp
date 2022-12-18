@@ -33,7 +33,7 @@ std::any CodeVisitor::visitProg(antlrcpp::CricketParser::ProgContext* ctx)
 	//visit main
 	visit(ctx->mainDeclr());
 
-	return 0;
+	return EXIT_SUCCESS;
 }
 
 
@@ -46,17 +46,14 @@ void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const
 	// Check warnings
 	//antlrcpp::CricketParser::TVoid
 	const std::string functionName = m_CurrentFunction->funcName;
-	if (m_CurrentFunction->returnType != "void") 
+	if (m_CurrentFunction->returnType != "void" && functionName != "main")
 	{
 		const std::string message = "No \"return\" found in non-void function \"" + functionName + "\" -> Defaulted to returning 0";
 		m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
-
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {"0"}, scope);
-		return;
 	}
 
 	// Add return instruction
-	if(functionName == "main" && m_CurrentFunction->returnType == "void")
+	if(functionName == "main" || m_CurrentFunction->returnType != "void")
 	{
 		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {"0"}, scope);
 	}
@@ -92,19 +89,28 @@ void CodeVisitor::CheckUnsupportedVoidType(const size_t lineNr, const std::initi
 
 // Maybe something to keep in mind:
 // https://stackoverflow.com/questions/1724594/x86-assembly-whats-the-main-prologue-and-epilogue
-std::any CodeVisitor::visitMainDeclrHeaderWithRet(antlrcpp::CricketParser::MainDeclrHeaderWithRetContext* ctx)
+std::any CodeVisitor::visitMainDeclrHeader(antlrcpp::CricketParser::MainDeclrHeaderContext* ctx)
 {
-	return std::any();
-}
-
-std::any CodeVisitor::visitMainDeclrHeaderNoRet(antlrcpp::CricketParser::MainDeclrHeaderNoRetContext* ctx)
-{
-	return std::any();
+	m_CurrentFunction = m_GlobalScope->AddFunc("main", ctx->FTYPE->getText(), 0, {}, {}, ctx->getStart()->getLine());
+	return EXIT_SUCCESS;
 }
 
 std::any CodeVisitor::visitMainDeclr(antlrcpp::CricketParser::MainDeclrContext* ctx)
 {
-	return std::any();
+	visit(ctx->mainDeclrHeader());
+
+	// Returns the scope that was newly created in visitBeginBlock()
+	Scope* newSymbolTable = std::any_cast<Scope*>(visit(ctx->beginBlock()));
+
+	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Prologue, "", { "main" }, newSymbolTable);
+
+	visit(ctx->body());
+
+	if (!newSymbolTable->HasReturned()) AddReturnDefaultInstr(ctx);
+
+	visit(ctx->endBlock());
+
+	return EXIT_SUCCESS;
 }
 
 #pragma endregion MainDeclr
@@ -221,7 +227,7 @@ std::any CodeVisitor::visitFuncDeclrHeader(antlrcpp::CricketParser::FuncDeclrCon
 		throw FunctionRedefenition(funcName, ctx->getStart()->getLine());
 
 	// Add function in symbol table
-	Function* func = m_GlobalScope->AddFunc(funcName, returnType->toString(), numParams, paramTypes, paramNames, ctx->getStart()->getLine());
+	Function* func = m_GlobalScope->AddFunc(funcName, returnType->getText(), numParams, paramTypes, paramNames, ctx->getStart()->getLine());
 	m_Cfg.CreateNewCurrBB(funcName, func);
 
 	return func;
@@ -264,50 +270,55 @@ std::any CodeVisitor::visitVarDeclr(antlrcpp::CricketParser::VarDeclrContext* ct
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
 	// Only one type
-	std::string varType = ctx->vartype()->getText();
+	std::string symType = ctx->vartype()->getText();
 	// But can have multiple names in cases like: "int a, b, c;"
 	const size_t numVariable = ctx->Identifier().size();
 	for (size_t i = 0; i < numVariable; ++i) 
 	{
-		std::string varName = ctx->Identifier(i)->getText();
+		std::string symName = ctx->Identifier(i)->getText();
 
 		// Check redefinition
-		if (scope->CheckSymbolRedefinition(varName, ctx->getStart()->getLine(), m_ErrorLogger))
+		if (scope->CheckSymbolRedefinition(symName, ctx->getStart()->getLine(), m_ErrorLogger))
 			return EXIT_FAILURE;
 
-		scope->AddSymbol(varName, varType, ctx->getStart()->getLine());
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Declaration, "", { varType, varName }, scope);
+		scope->AddSymbol(symName, symType, ctx->getStart()->getLine());
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Declaration, "", { symType, symName }, scope);
 	}
 	return EXIT_SUCCESS;
 }
 
-//ex. int a = 5; 
+//ex. int a = 5; (not to confuse with a = 5; which would just be assign expr (no declaration))
 std::any CodeVisitor::visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAndAssignContext* ctx)
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	std::string varType = ctx->vartype()->getText();
-	std::string varName = ctx->vartype()->getText();
+	std::string lhsSymType = ctx->vartype()->getText();
+	std::string lhsSymName = ctx->Identifier()->getText();
 
 	// Check redefinition
-	if (scope->CheckSymbolRedefinition(varName, ctx->getStart()->getLine(), m_ErrorLogger))
+	if (scope->CheckSymbolRedefinition(lhsSymName, ctx->getStart()->getLine(), m_ErrorLogger))
 		return EXIT_FAILURE;
 
-	scope->AddSymbol(varName, varType, ctx->getStart()->getLine());
+	// Declare symbol
+	scope->AddSymbol(lhsSymName, lhsSymType, ctx->getStart()->getLine());
+
+	// Get curr sp
 	int currStackPointer = scope->GetStackPointer();
-	Symbol* result = std::any_cast<Symbol*>(visit(ctx->expr()));
 
-	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	if (result->varType == "void") 
-	{
-		const std::string message = std::format("{} void type assignment not supported", varName);
-		throw Unsupported_Expression(message, ctx->getStart()->getLine());
-	}
+	Symbol* rhsResult = std::any_cast<Symbol*>(visit(ctx->expr()));
 
-	// Reset the stack pointer and temp variable counter after having evaluated the expression
+	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody)
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), {rhsResult});
+	//if (rhsResult->symType == "void") 
+	//{
+	//	const std::string message = std::format("{} void type assignment not supported", lhsName);
+	//	throw Unsupported_Expression(message, ctx->getStart()->getLine());
+	//}
+
+	// Set the sp back to previous value
 	scope->SetStackPointer(currStackPointer);
 
-	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Assign, varName, { result->varName }, scope);
+	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Assign, lhsSymName, { rhsResult->varName }, scope);
 
 	return EXIT_SUCCESS;
 }
@@ -325,20 +336,20 @@ std::any CodeVisitor::visitUnaryExpr(antlrcpp::CricketParser::UnaryExprContext* 
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var = std::any_cast<Symbol*>(visit(ctx->primaryExpr()));
+	Symbol* sym = std::any_cast<Symbol*>(visit(ctx->primaryExpr()));
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var });
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { sym });
 
-	// Create a temp to hold the result of the unary expr
-	Symbol* resultTemp = CreateTempSymbol(ctx, var->varType);
+	// Create a temp to hold the rhsResult of the unary expr
+	Symbol* resultTemp = CreateTempSymbol(ctx, sym->varType);
 
 	switch (ctx->UNARY->getType())
 	{
 	case CricketParser::ExclamationMark:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::NotEqual, resultTemp->varName, { var->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::NotEqual, resultTemp->varName, { sym->varName }, scope);
 		break;
 	case CricketParser::Minus:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Negate, resultTemp->varName, { var->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Negate, resultTemp->varName, { sym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported unary type: " + ctx->UNARY->toString(), ctx->getStart()->getLine());
@@ -351,24 +362,24 @@ std::any CodeVisitor::visitMulDivModExpr(antlrcpp::CricketParser::MulDivModExprC
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var1 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
-	Symbol* var2 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so result will always be int
+	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
+	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var1, var2 });
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
 
 	switch (ctx->MULTIPLICATIVE->getType())
 	{
 	case CricketParser::Mul:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Mul, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Mul, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::Div:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Div, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Div, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::Mod:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Mod, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Mod, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->MULTIPLICATIVE->toString() + ", expected '*', '/', or '%'", ctx->getStart()->getLine());
@@ -381,22 +392,22 @@ std::any CodeVisitor::visitAddSubExpr(antlrcpp::CricketParser::AddSubExprContext
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var1 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
-	Symbol* var2 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so result will always be int
+	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
+	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var1, var2 });
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
 
 	switch (ctx->ADDITIVE->getType())
 	{
 	case CricketParser::Minus:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Minus, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Minus, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::Plus:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Plus, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Plus, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->ADDITIVE->toString() + ", expected '-', or '+'", ctx->getStart()->getLine());
@@ -409,21 +420,21 @@ std::any CodeVisitor::visitCmpLessOrGreaterExpr(antlrcpp::CricketParser::CmpLess
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var1 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
-	Symbol* var2 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so result will always be int
+	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
+	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), {var1, var2});
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), {lhsSym, rhsSym});
 
 	switch (ctx->CMP->getType())
 	{
 	case CricketParser::LessThan:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::LessThan, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::LessThan, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::GreaterThan:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::GreaterThan, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::GreaterThan, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->CMP->toString() + ", expected '<', or '>'", ctx->getStart()->getLine());
@@ -436,21 +447,21 @@ std::any CodeVisitor::visitCmpEqualityExpr(antlrcpp::CricketParser::CmpEqualityE
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var1 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
-	Symbol* var2 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so result will always be int
+	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
+	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var1, var2 });
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
 
 	switch (ctx->EQ->getType())
 	{
 	case CricketParser::Equal:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Equal, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Equal, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::NotEqual:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::NotEqual, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::NotEqual, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->EQ->toString() + ", expected '==', or '!='", ctx->getStart()->getLine());
@@ -463,21 +474,21 @@ std::any CodeVisitor::visitCmpEqualityLessGreaterExpr(antlrcpp::CricketParser::C
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var1 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
-	Symbol* var2 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so result will always be int
+	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
+	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var1, var2 });
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
 
 	switch (ctx->LGEQ->getType())
 	{
 	case CricketParser::LessOrEqual:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::LessOrEqual, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::LessOrEqual, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::GreaterOrEqual:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::GreaterOrEqual, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::GreaterOrEqual, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->LGEQ->toString() + ", expected '<=', or '>='", ctx->getStart()->getLine());
@@ -490,24 +501,24 @@ std::any CodeVisitor::visitBitwiseExpr(antlrcpp::CricketParser::BitwiseExprConte
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	Symbol* var1 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
-	Symbol* var2 = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so result will always be int
+	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
+	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
-	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { var1, var2 });
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
 
 	switch (ctx->BITWISE->getType())
 	{
 	case CricketParser::BitwiseAnd:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::BitwiseAnd, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::BitwiseAnd, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::BitwiseOr:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::BitwiseOr, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::BitwiseOr, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	case CricketParser::BitwiseXor:
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::BitwiseXor, resultTemp->varName, { var1->varName, var2->varName }, scope);
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::BitwiseXor, resultTemp->varName, { lhsSym->varName, rhsSym->varName }, scope);
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->BITWISE->toString() + ", expected '&', '|', or '^'", ctx->getStart()->getLine());
@@ -567,41 +578,45 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 	switch (ctx->CONST->getType())
 	{
 	case CricketParser::Number:
-		//For now only support integer types
-		auto value = std::stoll(ctx->getText());
-		if (value > INT_MAX || value < INT_MIN)
 		{
-			value = static_cast<int>(value);
-			//Send a warning to inform the user
-			std::string message = "signed integral constant overflow '" + ctx->getText() + "' to '" + std::to_string(value) + "'";
-			m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
+			//For now only support integer types
+			auto value = std::stoll(ctx->getText());
+			if (value > INT_MAX || value < INT_MIN)
+			{
+				value = static_cast<int>(value);
+				//Send a warning to inform the user
+				std::string message = "signed integral constant overflow '" + ctx->getText() + "' to '" + std::to_string(value) + "'";
+				m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
+			}
+
+			resultTemp = CreateTempSymbol(ctx, "int", new int(value));
+
+			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
+			// can be usefull for looking at what instructions are happening
+			if (!m_Cfg.GetOptimized())
+				m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, resultTemp->varName, { std::to_string(value) }, scope);
+
+			break;
 		}
-
-		resultTemp = CreateTempSymbol(ctx, "int", new int(value));
-
-		// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
-		// can be usefull for looking at what instructions are happening
-		if (!m_Cfg.GetOptimized())
-			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, resultTemp->varName, { std::to_string(value) }, scope);
-
-		break;
 	case CricketParser::CharLiteral:
-		//// Remove the surrounding ' we also only need to get one char as its a char literal
-		////auto str = ctx->getText();
-		////str.erase(std::ranges::remove(str, '\'').begin(), str.end());
-		////auto charLiteral = str[0];
-		
-		// Do [1] to skip the surrounding '
-		const int charLiteralValue = ctx->getText()[1]; //TODO: test a char like: char c = '\''
+		{
+			//// Remove the surrounding ' we also only need to get one char as its a char literal
+			////auto str = ctx->getText();
+			////str.erase(std::ranges::remove(str, '\'').begin(), str.end());
+			////auto charLiteral = str[0];
+			
+			// Do [1] to skip the surrounding '
+			const int charLiteralValue = ctx->getText()[1]; //TODO: test a char like: char c = '\''
 
-		resultTemp = CreateTempSymbol(ctx, "char", new int(charLiteralValue));
+			resultTemp = CreateTempSymbol(ctx, "char", new int(charLiteralValue));
 
-		// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
-		// can be usefull for looking at what instructions are happening
-		if (!m_Cfg.GetOptimized())
-			m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, resultTemp->varName, { std::to_string(charLiteralValue) }, scope);
+			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
+			// can be usefull for looking at what instructions are happening
+			if (!m_Cfg.GetOptimized())
+				m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::WriteConst, resultTemp->varName, { std::to_string(charLiteralValue) }, scope);
 
-		break;
+			break;
+		}
 	default:
 		throw Unsupported_Expression("Used unsupported literal type: " + ctx->CONST->toString() + ", expected 'int', or 'char'", ctx->getStart()->getLine());
 	}
@@ -613,13 +628,13 @@ std::any CodeVisitor::visitVarExpr(antlrcpp::CricketParser::VarExprContext* ctx)
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 
-	const std::string varName = ctx->Identifier()->getText();
+	const std::string idName = ctx->Identifier()->getText();
 	// Check if symbol exists
-	if (!scope->HasSymbol(varName))
-		throw Unknown_Symbol(varName, ctx->getStart()->getLine());
+	if (!scope->HasSymbol(idName))
+		throw Unknown_Symbol(idName, ctx->getStart()->getLine());
 
 	// Set it to used for compiler optimizations later
-	auto sym = scope->GetSymbol(varName);
+	auto sym = scope->GetSymbol(idName);
 	sym->isUsed = true;
 
 	return sym;
@@ -631,17 +646,66 @@ std::any CodeVisitor::visitVarExpr(antlrcpp::CricketParser::VarExprContext* ctx)
 
 std::any CodeVisitor::visitAssignExpr(antlrcpp::CricketParser::AssignExprContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+
+	std::string lhsName = ctx->Identifier()->getText();
+
+	if (!scope->HasSymbol(lhsName))
+		throw Unknown_Symbol(lhsName, ctx->getStart()->getLine());
+
+	// Get curr sp
+	int currStackPointer = scope->GetStackPointer();
+
+	// Get the value we want to assign
+	Symbol* rhsResult = std::any_cast<Symbol*>(visit(ctx->expr()));
+
+	// Set the sp back to previous value
+	scope->SetStackPointer(currStackPointer);
+
+	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody)
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { rhsResult });
+
+	// Add the operation to save the expression into the variable 
+	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Assign, lhsName, { rhsResult->varName }, scope);
+	//TODO: maybe needs a cpy?
+	return scope->GetSymbol(lhsName);
 }
 
 std::any CodeVisitor::visitPmmdEqual(antlrcpp::CricketParser::PmmdEqualContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+
+	std::string lhsName = ctx->Identifier()->getText();
+	if (!scope->HasSymbol(lhsName))
+		throw Unknown_Symbol(lhsName, ctx->getStart()->getLine());
+
+	Symbol* rhsResult = std::any_cast<Symbol*>(visit(ctx->primaryExpr()));
+
+	switch (ctx->OPPMMD->getType())
+	{
+	case CricketParser::PlusEqual:
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::PlusEqual, lhsName, { rhsResult->varName }, scope);
+		break;
+	case CricketParser::MinusEqual:
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::MinusEqual, lhsName, { rhsResult->varName }, scope);
+		break;
+	case CricketParser::MulEqual:
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::MulEqual, lhsName, { rhsResult->varName }, scope);
+		break;
+	case CricketParser::DivEqual:
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::DivEqual, lhsName, { rhsResult->varName }, scope);
+		break;
+	default:
+		throw Unsupported_Expression("Used unsupported operation type: " + ctx->OPPMMD->toString() + ", expected '+=', '-=', '*=', or '/='", ctx->getStart()->getLine());
+	}
+
+	return scope->GetSymbol(lhsName);
 }
 
 #pragma endregion Assign
 
-
+//TODO: Implement
+#pragma region Statements
 std::any CodeVisitor::visitIfStatement(antlrcpp::CricketParser::IfStatementContext* ctx)
 {
 	return std::any();
@@ -656,14 +720,49 @@ std::any CodeVisitor::visitWhileStatement(antlrcpp::CricketParser::WhileStatemen
 {
 	return std::any();
 }
+#pragma endregion Statements
 
 
 std::any CodeVisitor::visitExprReturn(antlrcpp::CricketParser::ExprReturnContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+	scope->SetReturned(true);
+
+	// Get curr sp
+	int currStackPointer = scope->GetStackPointer();
+
+	Symbol* rhsResult = std::any_cast<Symbol*>(visit(ctx->expr()));
+	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { rhsResult });
+
+	// Set the sp back to previous value
+	scope->SetStackPointer(currStackPointer);
+
+	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", { rhsResult->varName }, scope);
+
+	return EXIT_SUCCESS;
 }
 
 std::any CodeVisitor::visitEmptyReturn(antlrcpp::CricketParser::EmptyReturnContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+	scope->SetReturned(true);
+
+	const std::string functionName = m_CurrentFunction->funcName;
+	if (m_CurrentFunction->returnType != "void")
+	{
+		const std::string message = "Empty return in non-void function \"" + functionName + "\" -> Defaulted to returning 0";
+		m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
+	}
+
+	// Add return instruction
+	if (functionName == "main" || m_CurrentFunction->returnType != "void")
+	{
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", { "0" }, scope);
+	}
+	else
+	{
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Return, "", {}, scope);
+	}
+
+	return EXIT_SUCCESS;
 }

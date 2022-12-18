@@ -64,6 +64,7 @@ private:
 #pragma region Instruction operations
 	void DefaultNotImplementedOperation() { throw NotImplementedException(); }
 	void Return(std::ostream& o);
+	void Assign(std::ostream& o);
 #pragma endregion Instruction operations
 };
 

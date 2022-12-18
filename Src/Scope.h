@@ -8,7 +8,7 @@
 class ErrorLogger;
 class SymbolTable;
 
-struct Symbol
+struct Symbol //TODO: chnage types to an enum as thatll probably be better than compairing strings all the time
 {
 	std::string varName;
 	int memoryOffset{};			// Its offset (in memory) to the base pointer 
@@ -45,8 +45,8 @@ public:
 	Symbol* GetSymbol(const std::string& name);
 	Function* GetFunc(const std::string& name);
 
-	Symbol* AddSymbol(const std::string& name, const std::string& varType, int varLine, int* constPtr = nullptr);
-	Function* AddFunc(const std::string& name, std::string retType, int nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, int funcLine);
+	Symbol* AddSymbol(const std::string& name, const std::string& varType, size_t varLine, int* constPtr = nullptr);
+	Function* AddFunc(const std::string& name, std::string retType, size_t nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, size_t funcLine);
 
 	const Scope* GetEnclosingScope() const;
 
@@ -58,8 +58,8 @@ public:
 
 	// Static Analysis
 	void CheckUnusedSymbols(ErrorLogger& errorLogger);
-	bool CheckFunctionRedefinition(const std::string& funcName, int lineNumber, ErrorLogger& errorLogger) const;
-	bool CheckSymbolRedefinition(const std::string& varName, int lineNumber, ErrorLogger& errorLogger) const;
+	bool CheckFunctionRedefinition(const std::string& funcName, size_t lineNumber, ErrorLogger& errorLogger) const;
+	bool CheckSymbolRedefinition(const std::string& varName, size_t lineNumber, ErrorLogger& errorLogger) const;
 
 private:
 	Symbol* AddSymbol(const Symbol& sym);

@@ -22,8 +22,7 @@ public:
 	std::any visitBody(antlrcpp::CricketParser::BodyContext* ctx) override;
 	std::any visitVarDeclr(antlrcpp::CricketParser::VarDeclrContext* ctx) override;
 	std::any visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAndAssignContext* ctx) override;
-	std::any visitMainDeclrHeaderWithRet(antlrcpp::CricketParser::MainDeclrHeaderWithRetContext* ctx) override;
-	std::any visitMainDeclrHeaderNoRet(antlrcpp::CricketParser::MainDeclrHeaderNoRetContext* ctx) override;
+	std::any visitMainDeclrHeader(antlrcpp::CricketParser::MainDeclrHeaderContext* ctx) override;
 	std::any visitMainDeclr(antlrcpp::CricketParser::MainDeclrContext* ctx) override;
 	std::any visitParExpr(antlrcpp::CricketParser::ParExprContext* ctx) override;
 	std::any visitVarExpr(antlrcpp::CricketParser::VarExprContext* ctx) override;

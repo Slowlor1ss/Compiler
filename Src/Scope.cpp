@@ -52,7 +52,7 @@ Symbol* Scope::GetSymbol(const std::string& name)
         m_EnclosingScope->GetSymbol(name);
     }
 
-	return nullptr;
+	return nullptr; //TODO!: maybe throw error here and remove all then useless checks but watch ut where the check and where the get happens
 }
 
 
@@ -76,7 +76,7 @@ Symbol* Scope::AddSymbol(const Symbol& sym)
     return &(m_SymbolMap[sym.varName] = sym);
 }
 
-Symbol* Scope::AddSymbol(const std::string& name, const std::string& varType, int varLine, int* constPtr)
+Symbol* Scope::AddSymbol(const std::string& name, const std::string& varType, size_t varLine, int* constPtr)
 {
     m_StackPointer -= m_TypeSizes[varType];
     const Symbol sym{ name, m_StackPointer, varType, varLine, false, true, false, constPtr };
@@ -88,7 +88,7 @@ Function* Scope::AddFunc(const Function& fn)
     return &(m_FuncMap[fn.funcName] = fn);
 }
 
-Function* Scope::AddFunc(const std::string& name, std::string retType, int nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, int funcLine)
+Function* Scope::AddFunc(const std::string& name, std::string retType, size_t nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, size_t funcLine)
 {
 	const Function fn{
             name, std::move(retType), nbParams, std::move(paramTypes), std::move(paramNames), funcLine, false
@@ -129,13 +129,13 @@ void Scope::CheckUnusedSymbols(ErrorLogger& errorLogger)
         if (!symbol.isUsed) 
         {
 	        std::string message = "Unused parameter \"" + symbolName + "\" at line " + std::to_string(symbol.varLine);
-            errorLogger.Signal(WARNING, message, -42);
+            errorLogger.Signal(WARNING, message, symbol.varLine);
         }
     }
 }
 
 // Return whether or not function already exists
-bool Scope::CheckFunctionRedefinition(const std::string& funcName, int lineNumber, ErrorLogger& errorLogger) const
+bool Scope::CheckFunctionRedefinition(const std::string& funcName, size_t lineNumber, ErrorLogger& errorLogger) const
 {
     if (this->HasFunc(funcName))
     {
@@ -146,7 +146,7 @@ bool Scope::CheckFunctionRedefinition(const std::string& funcName, int lineNumbe
     return false;
 }
 
-bool Scope::CheckSymbolRedefinition(const std::string& varName, int lineNumber, ErrorLogger& errorLogger) const
+bool Scope::CheckSymbolRedefinition(const std::string& varName, size_t lineNumber, ErrorLogger& errorLogger) const
 {
     if (this->HasSymbol(varName))
     {
