@@ -91,13 +91,25 @@ void CodeVisitor::CheckUnsupportedVoidType(const size_t lineNr, const std::initi
 // https://stackoverflow.com/questions/1724594/x86-assembly-whats-the-main-prologue-and-epilogue
 std::any CodeVisitor::visitMainDeclrHeader(antlrcpp::CricketParser::MainDeclrHeaderContext* ctx)
 {
-	m_CurrentFunction = m_GlobalScope->AddFunc("main", ctx->FTYPE->getText(), 0, {}, {}, ctx->getStart()->getLine());
-	return EXIT_SUCCESS;
+	Function* func = m_GlobalScope->AddFunc("main", ctx->FTYPE->getText(), 0, {}, {}, ctx->getStart()->getLine());
+	m_Cfg.CreateNewCurrBB(func);
+	return func;
 }
 
 std::any CodeVisitor::visitMainDeclr(antlrcpp::CricketParser::MainDeclrContext* ctx)
 {
-	visit(ctx->mainDeclrHeader());
+	Function* headerFunc;
+	try
+	{
+		headerFunc = std::any_cast<Function*>(visit(ctx->mainDeclrHeader()));
+	}
+	catch (Redefenition_Error& e)
+	{
+		m_ErrorLogger.Signal(ERROR, e.what(), e.lineNr());
+		return EXIT_FAILURE;
+	}
+
+	m_CurrentFunction = headerFunc;
 
 	// Returns the scope that was newly created in visitBeginBlock()
 	Scope* newSymbolTable = std::any_cast<Scope*>(visit(ctx->beginBlock()));
@@ -163,24 +175,35 @@ std::any CodeVisitor::visitFuncDeclr(antlrcpp::CricketParser::FuncDeclrContext* 
 
 	// Returns the scope that was newly created in visitBeginBlock()
 	Scope* newSymbolTable = std::any_cast<Scope*>(visit(ctx->beginBlock()));
-	//Scope* newSymbolTable = m_GlobalSymbolTable->CurrentScope();
+	// Scope* newSymbolTable = m_GlobalSymbolTable->CurrentScope();
+
+	int paramStackOffset = 16;	// The size of the return address RAX(64-bit) or EAX(32-bit) stored on the stack when calling the function (in our case RAX)
+	// RAX is only 8 bytes but the RBP already takes the first 8 bytes so we start from 16 -> |-8| localVar |0| RBP |8| RAX |16| param |24|
+	// (used for when there are more parameters than register to hold them, then these will be pushed on the stack but behind the return value)
 
 	// Add func-params in the function it's scoped symbol table
-	for (int i = 0; i < headerFunc->nbParameters; i++) 
+	for (size_t i{0}; i < headerFunc->nbParameters; ++i)
 	{
-		newSymbolTable->AddSymbol(headerFunc->parameterNames[i], headerFunc->parameterTypes[i], ctx->getStart()->getLine());
+		int sp = newSymbolTable->GetStackPointer();
+		auto sym = newSymbolTable->AddSymbol(headerFunc->parameterNames[i], headerFunc->parameterTypes[i], ctx->getStart()->getLine());
+		if (i+1 > Instruction::GetAmountOfRegisters()) // i+1 bc its starts from 0 and amntRegisters doesn't
+		{
+			sym->memoryOffset = paramStackOffset; // This will be the new mem offset
+			// Make room for next param that gets pushed on the stack (note: this is only used when there are more than 6 parameters)
+			paramStackOffset += 8;
+
+			newSymbolTable->SetStackPointer(sp); // Set the stack pointer back as if this param wasn't added
+		}
 	}
 
 	// Create prologue instruction
 	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Prologue, "", { headerFunc->funcName }, newSymbolTable);
-	int paramStackOffset = 16; // The size of the return adress stored on the stack when calling the function
-	//https://www.reddit.com/r/learnprogramming/comments/2q8hst/why_in_x86_asm_are_parameters_given_backwards/
+	// https://www.reddit.com/r/learnprogramming/comments/2q8hst/why_in_x86_asm_are_parameters_given_backwards/
 	for (size_t i = headerFunc->nbParameters - 1; i != size_t(-1); i--)
 	{
 		// Create instruction that moves function parameter from register to stack frame
 		// sort of preloading the function parameters if any (gets optimized away later if unused and if optimizations are turned on)
-		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::ReadParam, "", { headerFunc->parameterNames[i], std::to_string(i), std::to_string(paramStackOffset) }, newSymbolTable);
-		paramStackOffset += 8;
+		m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::ReadParam, "", { headerFunc->parameterNames[i], std::to_string(i)}, newSymbolTable);
 	}
 
 	// Create body instructions
@@ -228,7 +251,7 @@ std::any CodeVisitor::visitFuncDeclrHeader(antlrcpp::CricketParser::FuncDeclrCon
 
 	// Add function in symbol table
 	Function* func = m_GlobalScope->AddFunc(funcName, returnType->getText(), numParams, paramTypes, paramNames, ctx->getStart()->getLine());
-	m_Cfg.CreateNewCurrBB(funcName, func);
+	m_Cfg.CreateNewCurrBB(func);
 
 	return func;
 }
@@ -566,6 +589,7 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 	Symbol* resultTemp = CreateTempSymbol(ctx, func->returnType);
 	m_Cfg.CurrentBB()->AddInstr(Instruction::Operation::Call, resultTemp->varName, { funcName, std::to_string(numParams) }, scope);
 	func->isCalled = true;
+	m_CurrentFunction->hasFuncCall = true;
 
 	return resultTemp;
 }

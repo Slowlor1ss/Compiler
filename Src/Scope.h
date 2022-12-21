@@ -18,6 +18,10 @@ struct Symbol //TODO: chnage types to an enum as thatll probably be better than 
 	bool isCorrect{}; 			// False when a dummy struct is returned to avoid bad cast
 	bool noConst{};				// Tell if the variable can be set as a simple const
 	int* constPtr{};  			// Const pointer
+
+	/// Returns a string that represents the location of the variable
+	/// @return "memOffset(%rbp)" */
+	std::string GetOffsetReg() const { return std::to_string(memoryOffset) + "(%rbp)"; }
 };
 
 struct Function {
@@ -28,12 +32,13 @@ struct Function {
 	std::vector<std::string> parameterNames; 	// The names of every parameter
 	size_t funcLine; 								// The line of code where the function is declared
 	bool isCalled{false};								// Sort of dirty flag checks whether the function is called used for optimazation later
+	bool hasFuncCall{ false };						// Whether or not the function contains a function call
 };
 
 class Scope
 {
 public:
-	explicit Scope(int sP = 0, Scope* par = nullptr);
+	explicit Scope(int sP = 0, Scope* parent = nullptr);
 	~Scope();
 
 	// Tell whether a variable ... is present in the table
@@ -60,6 +65,7 @@ public:
 	void CheckUnusedSymbols(ErrorLogger& errorLogger);
 	bool CheckFunctionRedefinition(const std::string& funcName, size_t lineNumber, ErrorLogger& errorLogger) const;
 	bool CheckSymbolRedefinition(const std::string& varName, size_t lineNumber, ErrorLogger& errorLogger) const;
+	int GetScopeSize();
 
 private:
 	Symbol* AddSymbol(const Symbol& sym);

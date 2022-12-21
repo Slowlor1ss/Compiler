@@ -4,7 +4,7 @@
 #include "ErrorHandeler.h"
 #include "SymbolTable.h"
 
-Scope::Scope(const int sP, Scope* par) : m_StackPointer(sP), m_EnclosingScope(par)
+Scope::Scope(const int sP, Scope* parent) : m_StackPointer(sP), m_EnclosingScope(parent)
 {
     if (m_EnclosingScope != nullptr) 
     {
@@ -155,4 +155,23 @@ bool Scope::CheckSymbolRedefinition(const std::string& varName, size_t lineNumbe
         return true;
     }
     return false;
+}
+
+int Scope::GetScopeSize()
+{
+    int size = 0;
+
+    // Calculate size of symbol table
+    for (const auto& v : m_SymbolMap)
+    {
+        size += m_TypeSizes[v.second.varType];
+    }
+
+    // Add size of child tables
+    for (Scope* sT : m_ChildScopes)
+    {
+        size += sT->GetScopeSize();
+    }
+    //TODO: check if we can optimize this somehow as the zise is often too big
+    return size;
 }

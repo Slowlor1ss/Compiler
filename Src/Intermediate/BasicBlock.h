@@ -24,6 +24,7 @@ public:
 	std::string GetLabel() const { return m_Label; }
 	Function* GetFunction() const { return m_Function; }
 	std::vector<Instruction*> GetInstrList() const { return m_Instructions; }
+	void GenerateX86(std::ostream& o) const;
 
 private:
 	ControlFlowGraph* m_CFG;

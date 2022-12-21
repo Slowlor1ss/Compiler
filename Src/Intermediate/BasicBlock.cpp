@@ -26,3 +26,10 @@ void BasicBlock::AddInstr(Instruction* instr)
 {
 	m_Instructions.emplace_back(instr);
 }
+
+void BasicBlock::GenerateX86(std::ostream& o) const
+{
+	o << m_Label << ":\n";
+	for (auto* instr : m_Instructions)
+		instr->GenerateASM(o);
+}
