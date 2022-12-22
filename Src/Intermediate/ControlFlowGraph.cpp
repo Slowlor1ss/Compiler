@@ -18,14 +18,14 @@ ControlFlowGraph::~ControlFlowGraph()
 
 BasicBlock* ControlFlowGraph::CreateNewCurrBB(Function* fn)
 {
-	std::string labelName{fn->funcName};
-	//Generate unique name for every function buy adding the first letter of the param types
-	if (!fn->parameterTypes.empty())
-		labelName += +"_";
-	for (auto& pt : fn->parameterTypes)
-		labelName += pt[0];
+	//std::string labelName{fn->funcName};
+	////Generate unique name for every function buy adding the first letter of the param types
+	//if (!fn->parameterTypes.empty())
+	//	labelName += +"_";
+	//for (auto& pt : fn->parameterTypes)
+	//	labelName += pt[0];
 
-	auto* bb = new BasicBlock(this, labelName, fn);
+	auto* bb = new BasicBlock(this, fn->funcName, fn);
 	m_BasicBlocks.emplace_back(bb);
 	m_CurrentBB = bb;
 	return bb;

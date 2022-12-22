@@ -1,8 +1,8 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "Instruction.h"
 
+struct Function;
 class Scope;
 class ControlFlowGraph;
 class Instruction;
@@ -17,7 +17,7 @@ public:
 	BasicBlock(ControlFlowGraph* cfg, std::string label, Function* fn);
 	~BasicBlock();
 
-	void AddInstr(Instruction::Operation op, std::string dest, std::vector<std::string> params, Scope* sT);
+	//void AddInstr(Instruction::Operation op, std::string dest, std::vector<std::string> params, Scope* sT);
 	void AddInstr(Instruction* instr);
 
 	ControlFlowGraph* GetCFG() const { return m_CFG; }

@@ -3,119 +3,20 @@
 #include <utility>
 #include "BasicBlock.h"
 #include "../SymbolTable.h"
+#include "../Scope.h"
+#include <format>
+#include <iostream>
 
 
 //https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
 
-Instruction::Instruction(BasicBlock* bb, Operation op, std::string dest, std::vector<std::string> params, Scope* scope)
-	: m_BasicBlock(bb)
-	, m_Scope(scope)
-	, m_Op(op)
-	, m_Dest(std::move(dest))
-	, m_Params(std::move(params))
-{
-}
-
-void Instruction::GenerateASM(std::ostream& o)
-{
-	switch (m_Op)
-	{
-	case Operation::Prologue:
-		Prologue(o);
-		break;
-	case Operation::WriteConst:
-		WriteCost(o);
-		break;
-	case Operation::ReadParam:
-		ReadParam(o);
-		break;
-	case Operation::WriteParam:
-		WriteParam(o);
-		break;
-	case Operation::Call:
-		Call(o);
-		break;
-	case Operation::Return:
-		Return(o);
-		break;
-	case Operation::LessThan:
-		throw UnImplementedInstr_Exception("LessThan");
-		break;
-	case Operation::GreaterThan:
-		throw UnImplementedInstr_Exception("GreaterThan");
-		break;
-	case Operation::BitwiseAnd:
-		throw UnImplementedInstr_Exception("BitwiseAnd");
-		break;
-	case Operation::BitwiseOr:
-		throw UnImplementedInstr_Exception("BitwiseOr");
-		break;
-	case Operation::BitwiseXor:
-		throw UnImplementedInstr_Exception("BitwiseXor");
-		break;
-	case Operation::Equal:
-		throw UnImplementedInstr_Exception("Equal");
-		break;
-	case Operation::NotEqual:
-		throw UnImplementedInstr_Exception("NotEqual");
-		break;
-	case Operation::LessOrEqual:
-		throw UnImplementedInstr_Exception("LessOrEqual");
-		break;
-	case Operation::GreaterOrEqual:
-		throw UnImplementedInstr_Exception("GreaterOrEqual");
-		break;
-	case Operation::Assign:
-		Assign(o);
-		break;
-	case Operation::Plus:
-		Plus(o);
-		break;
-	case Operation::Minus:
-		throw UnImplementedInstr_Exception("Minus");
-		break;
-	case Operation::Mul:
-		throw UnImplementedInstr_Exception("Mul");
-		break;
-	case Operation::Div:
-		throw UnImplementedInstr_Exception("Div");
-		break;
-	case Operation::Mod:
-		throw UnImplementedInstr_Exception("Mod");
-		break;
-	case Operation::PlusEqual:
-		throw UnImplementedInstr_Exception("PlusEqual");
-		break;
-	case Operation::MinusEqual:
-		throw UnImplementedInstr_Exception("MinusEqual");
-		break;
-	case Operation::MulEqual:
-		throw UnImplementedInstr_Exception("MulEqual");
-		break;
-	case Operation::DivEqual:
-		throw UnImplementedInstr_Exception("DivEqual");
-		break;
-	case Operation::ExclamationMark:
-		throw UnImplementedInstr_Exception("ExclamationMark");
-		break;
-	case Operation::Negate:
-		throw UnImplementedInstr_Exception("Negate");
-		break;
-	case Operation::Declaration:
-		throw UnImplementedInstr_Exception("Declaration");
-		break;
-	default:
-		assert(!"should never get here!"); //!"string" evaluates to false
-		return;
-	}
-}
 
 // This prologue sets up the stack frame for the function, which will be used to access local
 // variables and pass arguments to other functions. It also saves the old base pointer, which
 // will be used to restore the previous stack frame when the function returns.
-void Instruction::Prologue(std::ostream& o)
+void Operation::Prologue::GenerateASM(std::ostream& o)
 {
-	const std::string label = m_Params.at(0);
+	const std::string label = m_BasicBlock->GetLabel();
 
 	// .globl my_function, declares my_function as a global symbol, meaning it can be called from other files.
 	o << ".globl " << label << '\n';
@@ -136,21 +37,17 @@ void Instruction::Prologue(std::ostream& o)
 }
 
 //https://scottc130.medium.com/implementing-functions-in-x86-assembly-a2fb7315e2e0
-void Instruction::Return(std::ostream& o)
+void Operation::Return::GenerateASM(std::ostream& o)
 {
 	//check if we're actually returning anything
-	if (!m_Params.empty())
+	if (!m_ReturnParam.empty())
 	{
-		// Move resultName in to EAX (return register)
-
-		const std::string param = m_Params[0];
-
 		// Returning a variable
-		if (m_Scope->HasSymbol(param))
+		if (m_Scope->HasSymbol(m_ReturnParam))
 		{
-			const Symbol* source = m_Scope->GetSymbol(param);
+			const Symbol* source = m_Scope->GetSymbol(m_ReturnParam);
 			const std::string sourceLoc = source->constPtr ? "$" + std::to_string((*source->constPtr)) : source->GetOffsetReg();
-	
+
 			o << FormatInstruction("movl", sourceLoc, "%eax");
 		}
 		// Returning a const value
@@ -158,32 +55,33 @@ void Instruction::Return(std::ostream& o)
 		{
 			// Convert const to right value
 			const bool isChar = m_BasicBlock->GetFunction()->returnType == "char";
-			const int constValue = isChar ? static_cast<int>(param[1]) : stoi(param);
+			const int constValue = isChar ? static_cast<int>(m_ReturnParam[1]) : stoi(m_ReturnParam);
 
 			o << FormatInstruction("movl", "$" + std::to_string(constValue), "%eax");
 		}
+		AddCommentToPrevInstruction(o, "[Return] save return value in the result adress");
 	}
 
 	// Move stack pointer back to where it was before the function
-	o << FormatInstruction("movq", "%rbp", "%rsp");
+	o << FormatInstruction("movq", "%rbp", "%rsp"); AddCommentToPrevInstruction(o, "[Return] Move stack pointer back to where it was before the function");
 	//https://stackoverflow.com/questions/4584089/what-is-the-function-of-the-push-pop-instructions-used-on-registers-in-x86-ass
 	// Move base pointer back to where it was before the function
-	o << FormatInstruction("popq", "%rbp");
-	o << FormatInstruction("ret");
+	o << FormatInstruction("popq", "%rbp"); AddCommentToPrevInstruction(o, "[Return] Retrieve base pointer");
+	o << FormatInstruction("ret"); AddCommentToPrevInstruction(o, "[Return]");
 }
 
-void Instruction::Call(std::ostream& o)
+void Operation::Call::GenerateASM(std::ostream& o)
 {
-	const std::string label = m_Params.at(0);
-	const Symbol* tempSym = m_Scope->GetSymbol(m_Dest);
-	const int numParams = std::stoi(m_Params.at(1));
+	//const std::string label = m_Params.at(0);
+	const Symbol* tempSym = m_Scope->GetSymbol(m_TempVarName);
+	//const int numParams = std::stoi(m_Params.at(1));
 
 	// Write ASM instructions
-	o << FormatInstruction("call", label); AddCommentToPrevInstruction(o, "[Call]");
-	if (numParams > 6) //TODO: test this properly!
+	o << FormatInstruction("call", m_UniqueFuncName); AddCommentToPrevInstruction(o, "[Call]");
+	if (m_AmountOfParams > 6) //TODO: test this properly!
 	{
 		// *8 because we use 'addq' in writeParam so we push 64bits at a time (and we do addq bc we add to RSP which is 64bit)
-		o << FormatInstruction("addq", '$' + std::to_string((numParams - m_AmountOfRegisters) * 8), "%rsp"); AddCommentToPrevInstruction(o, "[Call] Move SP back to position where it was before pushing the params that didn't fit in registers");
+		o << FormatInstruction("addq", '$' + std::to_string((m_AmountOfParams - m_AmountOfRegisters) * 8), "%rsp"); AddCommentToPrevInstruction(o, "[Call] Move SP back to position where it was before pushing the params that didn't fit in registers");
 	}
 
 	//NOTE: only needed when function actually returns something
@@ -192,18 +90,16 @@ void Instruction::Call(std::ostream& o)
 	{
 		o << FormatInstruction("movl", "%eax", tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Call] Save Func Return value into " + tempSym->varName);
 	}
-
 }
 
-void Instruction::WriteParam(std::ostream& o)
+void Operation::WriteParam::GenerateASM(std::ostream& o)
 {
-	int currParamIdx = std::stoi(m_Params.at(1));
-	Symbol* givenParamSym = m_Scope->GetSymbol(m_Params.at(0)); //load the value/symbol that's given as parameter to the function
+	const Symbol* givenParamSym = m_Scope->GetSymbol(m_ParamName); //load the value/symbol that's given as parameter to the function
 
 	// Use registers as long as there are available
-	if (currParamIdx < m_AmountOfRegisters)
+	if (m_ParamIdx < m_AmountOfRegisters)
 	{
-		const std::string reg = m_TypeRegisterMap.at(givenParamSym->varType)[currParamIdx];
+		const std::string reg = m_TypeRegisterMap.at(givenParamSym->varType)[m_ParamIdx];
 		const std::string movInstr = (givenParamSym->varType == "char") ? "movb" : "movl";
 
 		std::string param;
@@ -217,7 +113,7 @@ void Instruction::WriteParam(std::ostream& o)
 		o << FormatInstruction(movInstr, param, reg); AddCommentToPrevInstruction(o, "[WriteParam] move param:" + givenParamSym->varName + " into " + reg);
 	}
 	// If we ran out of registers push parameters on the stack
-	else 
+	else
 	{
 		//NOTE: THESE PUSH'S DON'T HAVE ANY POP'S
 		//2nd NOTE: (they don't need any as they will be overwritten by next function as the sp moves behind them (See: Instruction::Call))
@@ -227,12 +123,12 @@ void Instruction::WriteParam(std::ostream& o)
 		}
 		else
 		{
-			if (givenParamSym->varType == "char") 
+			if (givenParamSym->varType == "char")
 			{
 				o << FormatInstruction("movzbl", givenParamSym->GetOffsetReg(), "%eax");
 				o << FormatInstruction("pushq", "%rax");
 			}
-			else 
+			else
 			{
 				o << FormatInstruction("pushq", givenParamSym->GetOffsetReg());
 			}
@@ -242,19 +138,20 @@ void Instruction::WriteParam(std::ostream& o)
 	}
 }
 
-void Instruction::ReadParam(std::ostream& o)
+void Operation::ReadParam::GenerateASM(std::ostream& o)
 {
-	int currParamIdx = std::stoi(m_Params.at(1));
-	Symbol* localParamSym = m_Scope->GetSymbol(m_Params.at(0));  //load the local symbol that's used as parameter of the function
+	//int currParamIdx = std::stoi(m_Params.at(1));
+	const Symbol* localParamSym = m_Scope->GetSymbol(m_ParamName);  //load the local symbol that's used as parameter of the function
 
 	// Use registers as long as there are available
-	if (currParamIdx < m_AmountOfRegisters) {
+	if (m_ParamIdx < m_AmountOfRegisters) {
 
-		const std::string reg = m_TypeRegisterMap.at(localParamSym->varType)[currParamIdx];
+		const std::string reg = m_TypeRegisterMap.at(localParamSym->varType)[m_ParamIdx];
 		const std::string movInstr = (localParamSym->varType == "char") ? "movb" : "movl";
 
 		o << FormatInstruction(movInstr, reg, localParamSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into param:" + localParamSym->varName);
 	}
+	//TODO: cleanup
 	// If we ran out of registers don't do anything values are already in the right location
 	//else //TODO: maybe only do these when they are actually used in code
 	//{ //TODO: this code will def have to change maybe the symbol its offset needs to be changed to new offset below or some optimazation magic
@@ -272,34 +169,60 @@ void Instruction::ReadParam(std::ostream& o)
 	//}
 }
 
-void Instruction::WriteCost(std::ostream& o)
+void Operation::WriteConst::GenerateASM(std::ostream& o)
 {
-	const std::string constValueString = m_Params.at(0);
-	const std::string tempSymName = m_Dest;
+	//const std::string constValueString = m_Params.at(0);
+	//const std::string tempSymName = m_Dest;
 
-	const Symbol* tempSym = m_Scope->GetSymbol(tempSymName);
+	const Symbol* tempSym = m_Scope->GetSymbol(m_SymName);
 	const bool isChar = tempSym->varType == "char";
 
-	o << FormatInstruction(isChar ? "movb" : "movl", "$" + constValueString, tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[WriteConst] move " + constValueString + " into " + tempSymName);
+	o << FormatInstruction(isChar ? "movb" : "movl", "$" + m_ValueString, tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[WriteConst] move " + m_ValueString + " into " + m_SymName);
+
 }
 
-void Instruction::Assign(std::ostream& o)
+void Operation::Assign::GenerateASM(std::ostream& o)
 {
-	const Symbol* dest = m_Scope->GetSymbol(m_Dest);
-	const Symbol* source = m_Scope->GetSymbol(m_Params.at(0));
+	const Symbol* dest = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* source = m_Scope->GetSymbol(m_RhsParamName);
 
 	const std::pair<std::string, std::string> instPair = GetMoveInstr(dest->varType, source->varType);
 	const std::string reg = dest->varType == "int" ? "%eax" : "%al";
 
-	o << FormatInstruction(instPair.first, source->GetOffsetReg(), reg);
-	o << FormatInstruction(instPair.second, reg, dest->GetOffsetReg());
+	o << FormatInstruction(instPair.first, source->GetOffsetReg(), reg); AddCommentToPrevInstruction(o, "[Assign] move " + source->varName + " in accumulator");
+	o << FormatInstruction(instPair.second, reg, dest->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Assign] move accumulator in " + dest->varName);
 }
 
-void Instruction::Plus(std::ostream& o)
+void Operation::Negate::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_Params.at(0));
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_Params.at(1));
-	const Symbol* resultSym = m_Scope->GetSymbol(m_Dest);
+	const Symbol* origSym = m_Scope->GetSymbol(m_OrigParamName);
+	const Symbol* tempSym = m_Scope->GetSymbol(m_TempParamName);
+
+
+	const std::string movInstr1 = origSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr2;
+	std::string reg2;
+	if (tempSym->varType == "char")
+	{
+		reg2 = "%al";
+		movInstr2 = "movb";
+	}
+	else
+	{
+		reg2 = "%eax";
+		movInstr2 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, origSym->GetOffsetReg(), "%eax"); AddCommentToPrevInstruction(o, "[Negate] copy original value to the accumulator");
+	o << FormatInstruction("negl", "%eax"); AddCommentToPrevInstruction(o, "[Negate] negate the accumulator");
+	o << FormatInstruction(movInstr2, reg2, tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Negate] save negated value in " + tempSym->varName);
+}
+
+void Operation::Plus::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
 
 	const std::string movInstr1 = GetMoveInstr(lhsSym->varType);
 	const std::string movInstr2 = GetMoveInstr(rhsSym->varType);
