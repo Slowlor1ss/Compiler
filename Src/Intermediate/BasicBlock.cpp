@@ -30,7 +30,6 @@ void BasicBlock::AddInstr(Instruction* instr)
 
 void BasicBlock::GenerateX86(std::ostream& o) const
 {
-	//o << m_Label << ":\n";
 	for (auto* instr : m_Instructions)
 		instr->GenerateASM(o);
 }

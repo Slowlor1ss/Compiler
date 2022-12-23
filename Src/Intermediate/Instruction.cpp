@@ -1,16 +1,17 @@
 #include "Instruction.h"
-#include <cassert>
-#include <utility>
 #include "BasicBlock.h"
 #include "../SymbolTable.h"
 #include "../Scope.h"
+#include "../ErrorHandeler.h"
+#include <cassert>
+#include <utility>
 #include <format>
 #include <iostream>
 
 
 //https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
 
-
+#pragma region FunctionOperations
 // This prologue sets up the stack frame for the function, which will be used to access local
 // variables and pass arguments to other functions. It also saves the old base pointer, which
 // will be used to restore the previous stack frame when the function returns.
@@ -99,6 +100,7 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 	// Use registers as long as there are available
 	if (m_ParamIdx < m_AmountOfRegisters)
 	{
+		//https://stackoverflow.com/questions/5134614/const-map-element-access
 		const std::string reg = m_TypeRegisterMap.at(givenParamSym->varType)[m_ParamIdx];
 		const std::string movInstr = (givenParamSym->varType == "char") ? "movb" : "movl";
 
@@ -146,6 +148,7 @@ void Operation::ReadParam::GenerateASM(std::ostream& o)
 	// Use registers as long as there are available
 	if (m_ParamIdx < m_AmountOfRegisters) {
 
+		//https://stackoverflow.com/questions/5134614/const-map-element-access
 		const std::string reg = m_TypeRegisterMap.at(localParamSym->varType)[m_ParamIdx];
 		const std::string movInstr = (localParamSym->varType == "char") ? "movb" : "movl";
 
@@ -168,6 +171,7 @@ void Operation::ReadParam::GenerateASM(std::ostream& o)
 		//o << FormatInstruction(movInstr, reg, localParamSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into " + localParamSym->varName);
 	//}
 }
+#pragma endregion FunctionOperations
 
 void Operation::WriteConst::GenerateASM(std::ostream& o)
 {
@@ -181,6 +185,7 @@ void Operation::WriteConst::GenerateASM(std::ostream& o)
 
 }
 
+#pragma region BasicOperations
 void Operation::Assign::GenerateASM(std::ostream& o)
 {
 	const Symbol* dest = m_Scope->GetSymbol(m_LhsParamName);
@@ -224,19 +229,394 @@ void Operation::Plus::GenerateASM(std::ostream& o)
 	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
 	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
 
-	const std::string movInstr1 = GetMoveInstr(lhsSym->varType);
-	const std::string movInstr2 = GetMoveInstr(rhsSym->varType);
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr3;
+	std::string reg3;
+	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
 
 	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Plus] move " + lhsSym->varName + " into EAX");
 	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Plus] move " + rhsSym->varName + " into EDX");
 	o << FormatInstruction("addl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Plus] add values together");
-	o << FormatInstruction("movl", "%eax", resultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Plus] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Plus] save result into " + resultSym->varName);
 }
 
+void Operation::Minus::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr3;
+	std::string reg3;
+	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Minus] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Minus] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Minus] subtract values");
+	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Minus] save result into " + resultSym->varName);
+}
+
+void Operation::Mul::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr3;
+	std::string reg3;
+	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Mul] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Mul] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("imull", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Mul] multiply values");
+	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Mul] save result into " + resultSym->varName);
+}
+
+void Operation::Div::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[Div] move " + lhsSym->varName + " into EAX");
+
+	// How "cltd" works and why im not using EDX for rhsSym
+	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
+	if (rhsSym->varType == "char")
+	{
+		o << FormatInstruction("movsbl", rhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[Div] move " + rhsSym->varName + " into ECX");
+		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
+	}
+	else
+	{
+		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", rhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
+	}
+
+
+	if (resultSym->varType == "char")
+	{
+		o << FormatInstruction("movb", "%al", resultSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[Div] save result into " + resultSym->varName);
+	}
+	else
+	{
+		o << FormatInstruction("movl", "%eax", resultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Div] save result into " + resultSym->varName);
+	}
+}
+
+void Operation::Mod::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[Mod] move " + lhsSym->varName + " into EAX");
+
+	// How "cltd" works and why im not using EDX for rhsSym
+	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
+	if (rhsSym->varType == "char")
+	{
+		o << FormatInstruction("movsbl", rhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[Mod] move " + rhsSym->varName + " into ECX");
+		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
+	}
+	else
+	{
+		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", rhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
+	}
+
+
+	if (resultSym->varType == "char")
+	{
+		o << FormatInstruction("movl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Mod] mov result in to EAX so we can do an movb operation");
+		o << FormatInstruction("movb", "%al", resultSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[Mod] save result into " + resultSym->varName);
+	}
+	else
+	{
+		o << FormatInstruction("movl", "%edx", resultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Mod] save result into " + resultSym->varName);
+	}
+}
+
+void Operation::PlusEqual::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+
+	std::string movInstr3;
+	std::string reg3;
+	if (lhsSym->varType == "char")
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("addl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[PlusEqual] add values together");
+	o << FormatInstruction(movInstr3, reg3, lhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[PlusEqual] save result into " + lhsSym->varName);
+}
+
+void Operation::MinusEqual::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+
+	std::string movInstr3;
+	std::string reg3;
+	if (lhsSym->varType == "char")
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MinusEqual] add values together");
+	o << FormatInstruction(movInstr3, reg3, lhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MinusEqual] save result into " + lhsSym->varName);
+}
+
+void Operation::MulEqual::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+
+	std::string movInstr3;
+	std::string reg3;
+	if (lhsSym->varType == "char")
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MulEqual] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MulEqual] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("imull", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MulEqual] add values together");
+	o << FormatInstruction(movInstr3, reg3, lhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MulEqual] save result into " + lhsSym->varName);
+}
+
+void Operation::DivEqual::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[DivEqual] move " + lhsSym->varName + " into EAX");
+
+	// How "cltd" works and why im not using EDX for rhsSym
+	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
+	if (rhsSym->varType == "char")
+	{
+		o << FormatInstruction("movsbl", rhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[DivEqual] move " + rhsSym->varName + " into ECX");
+		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
+	}
+	else
+	{
+		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", rhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
+	}
+
+
+	if (lhsSym->varType == "char")
+	{
+		o << FormatInstruction("movb", "%al", lhsSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[DivEqual] save result into " + lhsSym->varName);
+	}
+	else
+	{
+		o << FormatInstruction("movl", "%eax", lhsSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[DivEqual] save result into " + lhsSym->varName);
+	}
+}
+#pragma endregion BasicOperations
+
+#pragma region BitwiseOperations
+void Operation::BitwiseAnd::GenerateASM(std::ostream& o)
+{
+	//TODO: Could be improved I think same for or and xor
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr3;
+	std::string reg3;
+	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("andl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[BitwiseAnd] bitwise AND op");
+	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseAnd] save result into " + resultSym->varName);
+}
+
+void Operation::BitwiseOr::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr3;
+	std::string reg3;
+	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("orl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[BitwiseOr] bitwise OR op");
+	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseOr] save result into " + resultSym->varName);
+}
+
+void Operation::BitwiseXor::GenerateASM(std::ostream& o)
+{
+	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
+	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+
+	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	std::string movInstr3;
+	std::string reg3;
+	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	{
+		reg3 = "%al";
+		movInstr3 = "movb";
+	}
+	else
+	{
+		reg3 = "%eax";
+		movInstr3 = "movl";
+	}
+
+	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction("xorl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[BitwiseXor] bitwise XOR op");
+	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseXor] save result into " + resultSym->varName);
+}
+#pragma endregion BitwiseOperations
+
+//TODO: implement assembly of branch related stuff when adding branch related stuff
+#pragma region cmpOperations
+void Operation::LessThan::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+
+void Operation::GreaterThan::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+
+void Operation::Equal::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+
+void Operation::NotEqual::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+
+void Operation::LessOrEqual::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+
+void Operation::GreaterOrEqual::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+
+void Operation::Not::GenerateASM(std::ostream& o)
+{
+	throw NotImplementedException();
+}
+#pragma endregion cmpOperations
 
 ///---------------------------
 ///	Utils
 ///---------------------------
+#pragma region InstructionUtils
 //TODO: remove function as its too confusing
 std::pair<std::string, std::string> Instruction::GetMoveInstr(const std::string& dest, const std::string& source)
 {
@@ -297,10 +677,11 @@ void Instruction::AddCommentToPrevInstruction(std::ostream& o, const std::string
 {
 	//remove /n to place comment on same line
 	o.seekp(-1, std::ostream::cur);
-	o << "\t#" + comment + '\n'; //technically overwrite \n
+	o << "\t\t#" + comment + '\n'; //technically overwrite \n
 }
 
 int Instruction::RoundUpToMultipleOf16(const int x)
 {
 	return (x + 15) & ~15;
 }
+#pragma endregion InstructionUtils

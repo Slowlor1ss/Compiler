@@ -56,7 +56,7 @@ private:
 	//creates a temp symbol and adds it to the sym list of the current scope
 	Symbol* CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, int* constPtr = nullptr);
 	std::string GetFuncUniqueName(std::string funcName, const std::vector<std::string>& paramTypes);
-	std::string GetFuncUniqueName(std::string funcName, const std::vector<Symbol*>& symbols;
+	std::string GetFuncUniqueName(std::string funcName, const std::vector<Symbol*>& symbols);
 	// Throws if one of the symbols has void as type
 	void CheckUnsupportedVoidType(const size_t lineNr, const std::initializer_list<Symbol*>& symbols) const;
 

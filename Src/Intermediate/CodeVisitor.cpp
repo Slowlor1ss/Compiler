@@ -190,15 +190,6 @@ std::any CodeVisitor::visitFuncDeclr(antlrcpp::CricketParser::FuncDeclrContext* 
 		return EXIT_FAILURE;
 	}
 
-#ifdef _DEBUG
-	std::string funcName = ctx->Identifier(0)->getText();
-	if (headerFunc->funcName != funcName)
-	{
-		m_ErrorLogger.Signal(ERROR, "Function name passed from \"visitFuncDeclrHeader()\" does not match function name ANTLR returns", ctx->getStart()->getLine());
-		return EXIT_FAILURE;
-	}
-#endif
-
 	m_CurrentFunction = headerFunc;
 
 	// Returns the scope that was newly created in visitBeginBlock()
@@ -446,7 +437,7 @@ std::any CodeVisitor::visitAddSubExpr(antlrcpp::CricketParser::AddSubExprContext
 
 	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
 	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
-	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
+	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int or char and char fits in int
 	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 

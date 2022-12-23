@@ -18,9 +18,10 @@ public:
 	void SetOptimized(bool o) { m_Optimized = o; }
 	BasicBlock* CurrentBB() const { return m_CurrentBB; }
 	void SetCurrentBB(BasicBlock* bb) { m_CurrentBB = bb; }
-	void GenerateX86(std::ostream& ostream);
+	void GenerateX86(std::stringstream& ss);
 
 private:
+	void OptimizeASM(std::stringstream& ss);
 	
 	std::vector<BasicBlock*> m_BasicBlocks;
 	//Option to enable CFG optimizations

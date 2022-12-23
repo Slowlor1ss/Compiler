@@ -1,9 +1,7 @@
 #pragma once
 #include <stdexcept>
 #include <format>
-#include <iostream>
 #include <source_location>
-#include "Intermediate/Instruction.h"
 
 //https://stackoverflow.com/questions/42939299/notimplementedexception-c
 class NotImplementedException final : public std::logic_error
@@ -33,14 +31,14 @@ private:
     size_t m_Line;
 };
 
-class UnImplementedInstr_Exception final : public std::runtime_error
-{
-public:
-
-    UnImplementedInstr_Exception(const std::string& operationName, const std::source_location location = std::source_location::current())
-        : runtime_error{ std::format("{} in {} is not implemented!", operationName, location.function_name()) }
-    {}
-};
+//class UnImplementedInstr_Exception final : public std::runtime_error
+//{
+//public:
+//
+//    UnImplementedInstr_Exception(const std::string& operationName, const std::source_location location = std::source_location::current())
+//        : runtime_error{ std::format("{} in {} is not implemented!", operationName, location.function_name()) }
+//    {}
+//};
 
 class Redefenition_Error : public Cricket_Error
 {
@@ -115,7 +113,7 @@ enum errorType { ERROR, WARNING };
 class ErrorLogger final
 {
 public:
-    void Signal(errorType severity, std::string_view  message, size_t lineNumber);
+    void Signal(errorType severity, std::string_view message, size_t lineNumber);
     bool HasError() const;
     bool HasWarning() const;
 

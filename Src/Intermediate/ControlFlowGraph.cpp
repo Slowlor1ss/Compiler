@@ -1,5 +1,9 @@
 #include "ControlFlowGraph.h"
 #include "BasicBlock.h"
+#include "../Scope.h"
+#include <iostream>
+#include <sstream>
+#include <string>
 
 ControlFlowGraph::ControlFlowGraph(bool optimized)
 	: m_Optimized(optimized)
@@ -39,10 +43,23 @@ BasicBlock* ControlFlowGraph::CreateNewCurrBB(Function* fn)
 //	return bb;
 //}
 
-void ControlFlowGraph::GenerateX86(std::ostream& ostream)
+void ControlFlowGraph::GenerateX86(std::stringstream& ss)
 {
+	// The .text directive indicates the start of the code section of the program
+	ss << ".text\n";
+
 	for (const auto* bb : m_BasicBlocks)
 	{
-		bb->GenerateX86(ostream);
+		bb->GenerateX86(ss);
 	}
+
+	if (m_Optimized)
+	{
+		OptimizeASM(ss);
+	}
+}
+
+void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
+{
+
 }
