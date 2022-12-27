@@ -8,31 +8,31 @@
 class ErrorLogger;
 class SymbolTable;
 
+//TODO: maybe make a private constructor and destructor or one that can only be accesed by scope
 struct Symbol //TODO: chnage types to an enum as thatll probably be better than compairing strings all the time
 {
-	std::string varName;
-	int memoryOffset{};			// Its offset (in memory) to the base pointer 
-	std::string varType;		// The type of the variable
-	size_t varLine{};				// The line of code where the variable is declared
-	bool isUsed{false};				// Sort of dirty flag checks whether the variable is used in the code
-	bool isCorrect{}; 			// False when a dummy struct is returned to avoid bad cast
-	bool noConst{};				// Tell if the variable can be set as a simple const
-	int* constPtr{};  			// Const pointer
+	std::string varName;		// Defined name for symbol (also used to check if a symbol isn't defined twice)
+	std::string varType;		// The type (int, char, void, ...)
+	size_t varLine{};			// The lineNr where the symbol was declared
+	int memoryOffset{};			// Offset to base pointer (used to find where the value is stored) 
+	int* constPtr{};  			// Pointer to the value in case its a constant literal
+	bool isUsed{false};			// Sort of dirty flag checks whether the variable is used in the code
 
 	/// Returns a string that represents the location of the variable
 	/// @return "memOffset(%rbp)" */
 	std::string GetOffsetReg() const { return std::to_string(memoryOffset) + "(%rbp)"; }
 };
 
-struct Function {
-	std::string funcName;
+struct Function
+{
+	std::string funcName;						// A unique name for function will be in format of function_type1type2... (allows overloading)
 	std::string returnType;
-	size_t nbParameters;							// The number of input parameters
-	std::vector<std::string> parameterTypes;	// The type of every input parameter
-	std::vector<std::string> parameterNames; 	// The names of every parameter
-	size_t funcLine; 								// The line of code where the function is declared
-	bool isCalled{false};								// Sort of dirty flag checks whether the function is called used for optimazation later
-	bool hasFuncCall{ false };						// Whether or not the function contains a function call
+	size_t nbParameters;
+	std::vector<std::string> parameterTypes;	// List of types of the parameters (in order)
+	std::vector<std::string> parameterNames; 	// List of names of every parameter (in order)
+	size_t funcLine; 							// The lineNr where the function was declared
+	bool isCalled{false};						// Sort of dirty flag checks whether the function is called used for optimization later
+	bool hasFuncCall{ false };					// Whether or not the function contains a function call
 };
 
 class Scope

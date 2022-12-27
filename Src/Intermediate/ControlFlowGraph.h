@@ -14,7 +14,7 @@ public:
 	BasicBlock* CreateNewCurrBB(Function* fn);
 	//BasicBlock* CreateNewCurrBB(Function* fn);
 
-	bool GetOptimized() { return m_Optimized; }
+	bool GetOptimized() const { return m_Optimized; }
 	void SetOptimized(bool o) { m_Optimized = o; }
 	BasicBlock* CurrentBB() const { return m_CurrentBB; }
 	void SetCurrentBB(BasicBlock* bb) { m_CurrentBB = bb; }
@@ -22,7 +22,8 @@ public:
 
 private:
 	void OptimizeASM(std::stringstream& ss);
-	
+	std::vector<std::string> Split(const std::string& s, const std::string& sep);
+
 	std::vector<BasicBlock*> m_BasicBlocks;
 	//Option to enable CFG optimizations
 	bool m_Optimized;
@@ -30,3 +31,5 @@ private:
 
 };
 
+//TODO: remove these globals and make some settings
+constexpr bool g_ConstPropagationAssignment{ false };

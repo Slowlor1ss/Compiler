@@ -1,6 +1,8 @@
 #pragma once
+#include <algorithm>
 #include <string>
 #include <vector>
+#include "Instruction.h"
 
 struct Function;
 class Scope;
@@ -24,8 +26,15 @@ public:
 	std::string GetLabel() const { return m_Label; }
 	Function* GetFunction() const { return m_Function; }
 	std::vector<Instruction*> GetInstrList() const { return m_Instructions; }
+	bool EvaluateConst(std::vector<Instruction*>::iterator it);
+	void OptimizeIR();
 	void GenerateX86(std::ostream& o) const;
 
+	void ReplaceInstruction(Instruction* oldInst, Instruction* newInst)
+	{
+		std::ranges::replace(m_Instructions, oldInst, newInst);
+		delete oldInst;
+	}
 private:
 	ControlFlowGraph* m_CFG;
 	std::string m_Label;

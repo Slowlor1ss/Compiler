@@ -1,7 +1,6 @@
 #include "ErrorHandeler.h"
 #include <cassert>
 #include <iostream>
-#include <utility>
 #include "ConsoleColors.h"
 
 void ErrorLogger::Signal(errorType severity, std::string_view message, size_t lineNumber)

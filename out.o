@@ -1,89 +1,17 @@
-.globl func3_iiiiiiiiiii
-.type	func3_iiiiiiiiiii, @function
-func3_iiiiiiiiiii:
-		pushq	%rbp	#Save the old base pointer
-		movq	%rsp, %rbp	#Set the base pointer to the current stack pointer
-		movl	%r9d, -24(%rbp)	#[ReadParam] move %r9d into param:c
-		movl	%r8d, -20(%rbp)	#[ReadParam] move %r8d into param:b
-		movl	%ecx, -16(%rbp)	#[ReadParam] move %ecx into param:a
-		movl	%edx, -12(%rbp)	#[ReadParam] move %edx into param:z
-		movl	%esi, -8(%rbp)	#[ReadParam] move %esi into param:y
-		movl	%edi, -4(%rbp)	#[ReadParam] move %edi into param:x
-		movl	16(%rbp), %eax	#[Plus] move d into EAX
-		movl	24(%rbp), %edx	#[Plus] move e into EDX
-		addl	%edx, %eax	#[Plus] add values together
-		movl	%eax, -32(%rbp)	#[Plus] save result into [TempSym_0]
-		movl	-32(%rbp), %eax	#[Plus] move [TempSym_0] into EAX
-		movl	32(%rbp), %edx	#[Plus] move h into EDX
-		addl	%edx, %eax	#[Plus] add values together
-		movl	%eax, -36(%rbp)	#[Plus] save result into [TempSym_1]
-		movl	-36(%rbp), %eax	#[Plus] move [TempSym_1] into EAX
-		movl	40(%rbp), %edx	#[Plus] move i into EDX
-		addl	%edx, %eax	#[Plus] add values together
-		movl	%eax, -40(%rbp)	#[Plus] save result into [TempSym_2]
-		movl	-40(%rbp), %eax	#[Plus] move [TempSym_2] into EAX
-		movl	48(%rbp), %edx	#[Plus] move j into EDX
-		addl	%edx, %eax	#[Plus] add values together
-		movl	%eax, -44(%rbp)	#[Plus] save result into [TempSym_3]
-		movl	-44(%rbp), %eax	#[Assign] move [TempSym_3] in accumulator
-		movl	%eax, -28(%rbp)	#[Assign] move accumulator in f
-		movl	24(%rbp), %eax	#[Assign] move e in accumulator
-		movl	%eax, -32(%rbp)	#[Assign] move accumulator in g
-		movl	$5, -40(%rbp)	#[WriteConst] move 5 into [TempSym_4]
-		movl	-40(%rbp), %eax	#[Assign] move [TempSym_4] in accumulator
-		movl	%eax, -36(%rbp)	#[Assign] move accumulator in test
-		movl	$5, -44(%rbp)	#[WriteConst] move 5 into [TempSym_5]
-		movl	-44(%rbp), %eax	#[Assign] move [TempSym_5] in accumulator
-		movl	%eax, -40(%rbp)	#[Assign] move accumulator in test2
-		movl	$5, -48(%rbp)	#[WriteConst] move 5 into [TempSym_6]
-		movl	-48(%rbp), %eax	#[Assign] move [TempSym_6] in accumulator
-		movl	%eax, -44(%rbp)	#[Assign] move accumulator in test3
-		movl	-20(%rbp), %eax	#[Return] save return value in the result adress
-		movq	%rbp, %rsp	#[Return] Move stack pointer back to where it was before the function
-		popq	%rbp	#[Return] Retrieve base pointer
-		ret	#[Return]
+.text
 .globl main
-.type	main, @function
+.type main, @function
 main:
-		pushq	%rbp	#Save the old base pointer
-		movq	%rsp, %rbp	#Set the base pointer to the current stack pointer
-		subq	$80, %rsp	#Make room on the stack for local variables
-		movl	$2, -8(%rbp)	#[WriteConst] move 2 into [TempSym_7]
-		movl	-8(%rbp), %eax	#[Assign] move [TempSym_7] in accumulator
-		movl	%eax, -4(%rbp)	#[Assign] move accumulator in a
-		movl	$3, -12(%rbp)	#[WriteConst] move 3 into [TempSym_8]
-		movl	-12(%rbp), %eax	#[Assign] move [TempSym_8] in accumulator
-		movl	%eax, -8(%rbp)	#[Assign] move accumulator in b
-		movl	$3, -16(%rbp)	#[WriteConst] move 3 into [TempSym_9]
-		movl	-16(%rbp), %eax	#[Assign] move [TempSym_9] in accumulator
-		movl	%eax, -12(%rbp)	#[Assign] move accumulator in c
-		movl	$5, -20(%rbp)	#[WriteConst] move 5 into [TempSym_10]
-		movl	-20(%rbp), %eax	#[Assign] move [TempSym_10] in accumulator
-		movl	%eax, -16(%rbp)	#[Assign] move accumulator in d
-		movl	$5, -24(%rbp)	#[WriteConst] move 5 into [TempSym_11]
-		movl	-24(%rbp), %eax	#[Assign] move [TempSym_11] in accumulator
-		movl	%eax, -20(%rbp)	#[Assign] move accumulator in e
-		movl	$5, -24(%rbp)	#[WriteConst] move 5 into [TempSym_12]
-		movl	$5, -28(%rbp)	#[WriteConst] move 5 into [TempSym_13]
-		movl	$5, -32(%rbp)	#[WriteConst] move 5 into [TempSym_14]
-		movl	$5, -36(%rbp)	#[WriteConst] move 5 into [TempSym_15]
-		movl	$5, -40(%rbp)	#[WriteConst] move 5 into [TempSym_16]
-		movl	$5, -44(%rbp)	#[WriteConst] move 5 into [TempSym_17]
-		pushq	-4(%rbp)	#[WriteParam] Push parameter on stack as theres no free register left
-		pushq	-20(%rbp)	#[WriteParam] Push parameter on stack as theres no free register left
-		pushq	-16(%rbp)	#[WriteParam] Push parameter on stack as theres no free register left
-		pushq	-12(%rbp)	#[WriteParam] Push parameter on stack as theres no free register left
-		pushq	-8(%rbp)	#[WriteParam] Push parameter on stack as theres no free register left
-		movl	$5, %r9d	#[WriteParam] move param:[TempSym_17] into %r9d
-		movl	$5, %r8d	#[WriteParam] move param:[TempSym_16] into %r8d
-		movl	$5, %ecx	#[WriteParam] move param:[TempSym_15] into %ecx
-		movl	$5, %edx	#[WriteParam] move param:[TempSym_14] into %edx
-		movl	$5, %esi	#[WriteParam] move param:[TempSym_13] into %esi
-		movl	$5, %edi	#[WriteParam] move param:[TempSym_12] into %edi
-		call	func3_iiiiiiiiiii	#[Call]
-		addq	$40, %rsp	#[Call] Move SP back to position where it was before pushing the params that didn't fit in registers
-		movl	%eax, -24(%rbp)	#[Call] Save Func Return value into [TempSym_18]
-		movl	$0, %eax	#[Return] save return value in the result adress
-		movq	%rbp, %rsp	#[Return] Move stack pointer back to where it was before the function
-		popq	%rbp	#[Return] Retrieve base pointer
-		ret	#[Return]
+		pushq	%rbp		#[Prologue] Save the old base pointer
+		movq	%rsp, %rbp		#[Prologue] Set the base pointer to the current stack pointer
+		movl	$3, -8(%rbp)		#[WriteConst] move 3 into b
+		movl	-4(%rbp), %eax		#[Plus] move a into EAX
+		movl	-8(%rbp), %edx		#[Plus] move b into EDX
+		addl	%edx, %eax		#[Plus] add values together
+		movl	%eax, -16(%rbp)		#[Plus] save result into [TempSym_1]
+		movl	-16(%rbp), %eax		#[Assign] move [TempSym_1] in accumulator
+		movl	%eax, -12(%rbp)		#[Assign] move accumulator in c
+		movl	$0, %eax		#[Return] save return value in the result adress
+		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
+		popq	%rbp		#[Return] Retrieve base pointer
+		ret		#[Return]

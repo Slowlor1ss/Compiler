@@ -1,69 +1,72 @@
 #pragma once
 #include <array>
+#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "../Scope.h"
+
+struct Symbol;
 class BasicBlock;
 class Scope;
 class SymbolTable;
 
-//TODO: change to base class and have enums be a class
 class Instruction
 {
-	struct InstrPriority
+	struct InstrPriority //TODO: implement or remove
 	{
 		int latency;
 		int priority;
 	};
 
 public:
-	//enum class Operation {
-		
-		//Prologue,
-		//WriteConst,
-		//ReadParam,
-		//WriteParam,
-		//Call,
-		//Return,
-		//LessThan,
-		//GreaterThan,
-		//BitwiseAnd,
-		//BitwiseOr,
-		//BitwiseXor,
-		//Equal,
-		//NotEqual,
-		//LessOrEqual,
-		//GreaterOrEqual,
-		//Declaration,
-		//Assign,
-		//Plus,
-		//Minus,
-		//Mul,
-		//Div,
-		//Mod,
-		//PlusEqual,
-		//MinusEqual,
-		//MulEqual,
-		//DivEqual,
-		//ExclamationMark,
-		//Negate,
-		//_LAST = Negate
-	//};
+	enum class OperationType
+	{
+		Prologue,
+		WriteConst,
+		ReadParam,
+		WriteParam,
+		Call,
+		Return,
+		LessThan,
+		GreaterThan,
+		BitwiseAnd,
+		BitwiseOr,
+		BitwiseXor,
+		Equal,
+		NotEqual,
+		LessOrEqual,
+		GreaterOrEqual,
+		Declaration,
+		Assign,
+		Plus,
+		Minus,
+		Mul,
+		Div,
+		Mod,
+		PlusEqual,
+		MinusEqual,
+		MulEqual,
+		DivEqual,
+		ExclamationMark,
+		Negate,
+		_LAST = Negate
+	};
 
-	// Getters / Setters
-	//Operation GetOp() const { return m_Op; }
-	//std::vector<std::string> GetParams() { return m_Params; }
 	virtual ~Instruction() = default;
 
-	void SetBasicBlock(BasicBlock* bb) { m_BasicBlock = bb; }
+	virtual bool PropagateConst() = 0; // Constant folding -> //https://en.wikipedia.org/wiki/Constant_folding
 	virtual void GenerateASM(std::ostream& o) = 0;
+
+	OperationType GetOp() const { return m_OperationType; }
+	void SetBasicBlock(BasicBlock* bb) { m_BasicBlock = bb; }
 	static constexpr int GetAmountOfRegisters() { return m_AmountOfRegisters; }
 
 protected:
-	explicit Instruction(Scope* scope)
-		: m_BasicBlock(nullptr), m_Scope(scope)
+	explicit Instruction(Scope* scope, OperationType op)
+		: m_BasicBlock(nullptr), m_Scope(scope), m_OperationType(op)
 	{}
 
 	static std::pair<std::string, std::string> GetMoveInstr(const std::string& dest, const std::string& source);
@@ -77,59 +80,48 @@ protected:
 
 	BasicBlock* m_BasicBlock;
 	Scope* m_Scope;
-	//Operation m_Op;
-	//std::string m_Dest;
-	//std::vector<std::string> m_Params;
+	const OperationType m_OperationType;
 
-	static constexpr int m_AmountOfRegisters{ 6 };
+	// TODO: quite confusing maybe go over this again later
+	// Registers used for calling functions and storing parameters of functions
+	// https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170
+	// we stop at r9 as according to the System V AMD64 ABI (Application Binary Interface),
+	// the R9 register and below are non-volatile, meaning they are not modified by function calls and their values are preserved across function calls.
+	// The R10 register and above are volatile, meaning they may be modified by function calls and their values are not preserved across function calls.
+	static constexpr int m_AmountOfRegisters{ 6 }; //TODO: maybe give more accurate name
 	using VartypeToRegisterMap = std::unordered_map<std::string, std::array<std::string, m_AmountOfRegisters>>;
 	inline static const VartypeToRegisterMap m_TypeRegisterMap{
 		{ "int", { "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d" }},
 		{ "char", { "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b" }}
 	};
-
-//#pragma region Instruction operations
-//	void Prologue(std::ostream& o);
-//	void Return(std::ostream& o);
-//	void Call(std::ostream& o);
-//	void WriteParam(std::ostream& o);
-//	void ReadParam(std::ostream& o);
-//	void WriteCost(std::ostream& o);
-//	void Assign(std::ostream& o);
-//	void Plus(std::ostream& o);
-//#pragma endregion Instruction operations
-//
-//#pragma region ConstInstr
-//	inline static const std::string EAX{ "%eax" };
-//	inline static const std::string AL{ "%al" };
-//
-//	inline static const std::string MOVL{ "movl" };
-//	inline static const std::string MOVB{ "movb" };
-//#pragma endregion ConstInstr
-
 };
 
 namespace Operation
 {
 
+#pragma region FunctionOperations
 	//https://en.wikipedia.org/wiki/Function_prologue_and_epilogue
 	class Prologue : public Instruction
 	{
 	public:
 		Prologue(Scope* scope)
-			: Instruction(scope)
+			: Instruction(scope, OperationType::Prologue)
 		{}
 
+		bool PropagateConst() override { return false; }
 		void GenerateASM(std::ostream& o) override;
+
 	};
 
 	class Return : public Instruction
 	{
 	public:
+		// Return param can be either a symbol name or a value (or empty when returning nothing)
 		Return(std::string returnParam, Scope* scope)
-			: Instruction(scope), m_ReturnParam(std::move(returnParam))
+			: Instruction(scope, OperationType::Return), m_ReturnParam(std::move(returnParam))
 		{}
 
+		bool PropagateConst() override { return false; }
 		void GenerateASM(std::ostream& o) override;
 
 	private:
@@ -139,17 +131,21 @@ namespace Operation
 	class Call : public Instruction
 	{
 	public:
-		Call(std::string tempResultName, std::string uniqueFuncName, size_t amountOfParams, Scope* scope)
-			: Instruction(scope)
-			, m_TempVarName(std::move(tempResultName))
+		Call(const std::string& tempResultName, std::string uniqueFuncName, size_t amountOfParams, Scope* scope)
+			: Call(scope->GetSymbol(tempResultName), std::move(uniqueFuncName), amountOfParams, scope)
+		{}
+		Call(const Symbol* param, std::string uniqueFuncName, size_t amountOfParams, Scope* scope)
+			: Instruction(scope, OperationType::Call)
+			, m_Param(param)
 			, m_UniqueFuncName(std::move(uniqueFuncName))
 			, m_AmountOfParams(amountOfParams)
 		{}
 
+		bool PropagateConst() override { return false; }
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		std::string m_TempVarName;
+		const Symbol* m_Param;
 		std::string m_UniqueFuncName;
 		size_t m_AmountOfParams;
 	};
@@ -157,416 +153,538 @@ namespace Operation
 	class WriteParam : public Instruction
 	{
 	public:
-		WriteParam(std::string paramName, const size_t paramIdx, Scope* scope)
-			: Instruction(scope), m_ParamName(std::move(paramName)), m_ParamIdx(paramIdx)
+		WriteParam(const std::string& paramName, const size_t paramIdx, Scope* scope)
+			: WriteParam(scope->GetSymbol(paramName), paramIdx ,scope)
+		{}
+		WriteParam(const Symbol* sym, const size_t paramIdx, Scope* scope)
+			: Instruction(scope, OperationType::WriteParam)
+			, m_Sym(sym)
+			, m_ParamIdx(paramIdx)
 		{}
 
+		bool PropagateConst() override { return false; }
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const std::string m_ParamName;
+		const Symbol* m_Sym;
 		const size_t m_ParamIdx;
 	};
 
 	class ReadParam : public Instruction
 	{
 	public:
-		ReadParam(std::string paramName, const size_t paramIdx, Scope* scope)
-			: Instruction(scope), m_ParamName(std::move(paramName)), m_ParamIdx(paramIdx)
+		ReadParam(const std::string& paramName, const size_t paramIdx, Scope* scope)
+			: ReadParam(scope->GetSymbol(paramName), paramIdx, scope)
+		{}
+		ReadParam(const Symbol* sym, const size_t paramIdx, Scope* scope)
+			: Instruction(scope, OperationType::WriteParam)
+			, m_Sym(sym)
+			, m_ParamIdx(paramIdx)
 		{}
 
+		bool PropagateConst() override { return false; }
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const std::string m_ParamName;
+		const Symbol* m_Sym;
 		const size_t m_ParamIdx;
 	};
+#pragma endregion FunctionOperations
 
 	class WriteConst : public Instruction
 	{
 	public:
-		WriteConst(std::string symName, std::string valueSting, Scope* scope)
-			: Instruction(scope), m_SymName(std::move(symName)), m_ValueString(std::move(valueSting))
+		WriteConst(const std::string& symName, std::string valueSting, Scope* scope)
+			: WriteConst(scope->GetSymbol(symName), std::move(valueSting), scope)
+		{}
+		WriteConst(const Symbol* sym, std::string valueSting, Scope* scope)
+			: Instruction(scope, OperationType::WriteConst)
+			, m_Sym(sym)
+			, m_ValueString(std::move(valueSting))
 		{}
 
 		void GenerateASM(std::ostream& o) override;
+		bool PropagateConst() override { return false; }
 
 	private:
-		std::string m_SymName;
+		const Symbol* m_Sym;
 		std::string m_ValueString;
 	};
 
 	class Assign : public Instruction
 	{
 	public:
-		Assign(std::string lhsSym, std::string rhsSym, Scope* scope)
-			: Instruction(scope), m_LhsParamName(std::move(lhsSym)), m_RhsParamName(std::move(rhsSym))
+		Assign(const std::string& destSymName, const std::string& sourceSymName, Scope* scope)
+			: Assign(scope->GetSymbol(destSymName), scope->GetSymbol(sourceSymName), scope)
+		{}
+		Assign(Symbol* destSym, const Symbol* sourceSym, Scope* scope)
+			: Instruction(scope, OperationType::Assign)
+			, m_DestSym(destSym)
+			, m_SourceSym(sourceSym)
 		{}
 
+		~Assign() override { std::cout << "Destructor called"; }
+
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
+		Symbol* m_DestSym;
+		const Symbol* m_SourceSym;
 	};
 
 	class Declaration : public Instruction
 	{
 	public:
-		Declaration(std::string symType, std::string symName, Scope* scope)
-			: Instruction(scope), m_SymType(std::move(symType)), m_SymName(std::move(symName))
+		//ex. int a, b, c;
+		Declaration(const std::string& symName, Scope* scope)
+			: Declaration(scope->GetSymbol(symName), scope)
+		{}
+		Declaration(const Symbol* sym, Scope* scope)
+			: Instruction(scope, OperationType::Declaration)
+			, m_Sym(sym)
 		{}
 
+		bool PropagateConst() override;
 		// Purposefully empty
 		void GenerateASM(std::ostream& o) override {}
 
 	private:
-		std::string m_SymType;
-		std::string m_SymName;
+		const Symbol* m_Sym;
 	};
 
 	class Negate : public Instruction
 	{
 	public:
-		Negate(std::string tempSymName, std::string origSymName, Scope* scope)
-			: Instruction(scope), m_TempParamName(std::move(tempSymName)), m_OrigParamName(std::move(origSymName))
+		Negate(const std::string& tempSymName, const std::string& origSymName, Scope* scope)
+			: Negate(scope->GetSymbol(tempSymName), scope->GetSymbol(origSymName), scope)
+		{}
+		Negate(Symbol* tempSym, Symbol* origSym, Scope* scope)
+			: Instruction(scope, OperationType::Negate)
+			, m_TempSym(tempSym)
+			, m_OrigSym(origSym)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const std::string m_TempParamName;
-		const std::string m_OrigParamName;
+		Symbol* m_TempSym;
+		const Symbol* m_OrigSym;
 	};
 
-	class Plus : public Instruction
+#pragma region Additive
+	class Additive : public Instruction
 	{
 	public:
-		Plus(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		bool PropagateConst() override = 0;
+		void GenerateASM(std::ostream& o) override = 0;
+
+	protected:
+		Additive(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope, OperationType op)
+			: Additive(scope->GetSymbol(resultSymName), scope->GetSymbol(lhsSymName), scope->GetSymbol(rhsSymName), scope, op)
+		{}
+		Additive(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope, OperationType op)
+			: Instruction(scope, op)
+			, m_ResultSym(resultSym)
+			, m_LhsSym(lhsSym)
+			, m_RhsSym(rhsSym)
 		{}
 
-		void GenerateASM(std::ostream& o) override;
+		bool CheckObsoleteExpr() const;
 
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
+		Symbol* m_ResultSym;
+		const Symbol* m_LhsSym;
+		const Symbol* m_RhsSym;
 	};
 
-	class Minus : public Instruction
+	class Plus : public Additive
 	{
 	public:
-		Minus(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		Plus(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Additive(resultSymName, lhsSymName, rhsSymName, scope, OperationType::Plus)
+		{}
+		Plus(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Additive(resultSym, lhsSym, rhsSym, scope, OperationType::Plus)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class Mul : public Instruction
+	class Minus : public Additive
 	{
 	public:
-		Mul(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		Minus(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Additive(resultSymName, lhsSymName, rhsSymName, scope, OperationType::Minus)
+		{}
+		Minus(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Additive(resultSym, lhsSym, rhsSym, scope, OperationType::Minus)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
+#pragma endregion Additive
 
-	class Div : public Instruction
+#pragma region Multiplicative
+	class Multiplicative : public Instruction
 	{
 	public:
-		Div(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		bool PropagateConst() override = 0;
+		void GenerateASM(std::ostream& o) override = 0;
+
+	protected:
+		Multiplicative(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope, OperationType op)
+			: Multiplicative(scope->GetSymbol(resultSymName), scope->GetSymbol(lhsSymName), scope->GetSymbol(rhsSymName), scope, op)
+		{}
+		Multiplicative(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope, OperationType op)
+			: Instruction(scope, op)
+			, m_ResultSym(resultSym)
+			, m_LhsSym(lhsSym)
+			, m_RhsSym(rhsSym)
 		{}
 
-		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
+		Symbol* m_ResultSym;
+		const Symbol* m_LhsSym;
+		const Symbol* m_RhsSym;
 	};
 
-	class Mod : public Instruction
+	class Mul : public Multiplicative
 	{
 	public:
-		Mod(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		Mul(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Multiplicative(resultSymName, lhsSymName, rhsSymName, scope, OperationType::Mul)
+		{}
+		Mul(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Multiplicative(resultSym, lhsSym, rhsSym, scope, OperationType::Mul)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class PlusEqual : public Instruction
+	class Div : public Multiplicative
 	{
 	public:
-		PlusEqual(std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		Div(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Multiplicative(resultSymName, lhsSymName, rhsSymName, scope, OperationType::Div)
+		{}
+		Div(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Multiplicative(resultSym, lhsSym, rhsSym, scope, OperationType::Div)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class MinusEqual : public Instruction
+	class Mod : public Multiplicative
 	{
 	public:
-		MinusEqual(std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		Mod(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Multiplicative(resultSymName, lhsSymName, rhsSymName, scope, OperationType::Mod)
+		{}
+		Mod(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Multiplicative(resultSym, lhsSym, rhsSym, scope, OperationType::Mod)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
+#pragma endregion Multiplicative
 
-	class MulEqual : public Instruction
+#pragma region AdditiveEqual
+	class AdditiveEqual : public Instruction
 	{
 	public:
-		MulEqual(std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		bool PropagateConst() override = 0;
+		void GenerateASM(std::ostream& o) override = 0;
+
+	protected:
+		AdditiveEqual(const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope, OperationType op)
+			: AdditiveEqual(scope->GetSymbol(lhsSymName), scope->GetSymbol(rhsSymName), scope, op)
+		{}
+		AdditiveEqual(Symbol* lhsSym, const Symbol* rhsSym, Scope* scope, OperationType op)
+			: Instruction(scope, op)
+			, m_LhsSym(lhsSym)
+			, m_RhsSym(rhsSym)
 		{}
 
-		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
+		Symbol* m_LhsSym;
+		const Symbol* m_RhsSym;
 	};
 
-	class DivEqual : public Instruction
+	class PlusEqual : public AdditiveEqual
 	{
 	public:
-		DivEqual(std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		PlusEqual(const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: AdditiveEqual(lhsSymName, rhsSymName, scope, OperationType::PlusEqual)
+		{}
+		PlusEqual(Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: AdditiveEqual(lhsSym, rhsSym, scope, OperationType::PlusEqual)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class BitwiseAnd : public Instruction
+	class MinusEqual : public AdditiveEqual
 	{
 	public:
-		BitwiseAnd(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		MinusEqual(const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: AdditiveEqual(lhsSymName, rhsSymName, scope, OperationType::MinusEqual)
+		{}
+		MinusEqual(Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: AdditiveEqual(lhsSym, rhsSym, scope, OperationType::MinusEqual)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
+#pragma endregion AdditiveEqual
 
-	class BitwiseOr : public Instruction
+#pragma region MultiplicativeEqual
+	class MultiplicativeEqual : public Instruction
 	{
 	public:
-		BitwiseOr(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		bool PropagateConst() override = 0;
+		void GenerateASM(std::ostream& o) override = 0;
+
+	protected:
+		MultiplicativeEqual(const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope, OperationType op)
+			: MultiplicativeEqual(scope->GetSymbol(lhsSymName), scope->GetSymbol(rhsSymName), scope, op)
+		{}
+		MultiplicativeEqual(Symbol* lhsSym, const Symbol* rhsSym, Scope* scope, OperationType op)
+			: Instruction(scope, op)
+			, m_LhsSym(lhsSym)
+			, m_RhsSym(rhsSym)
 		{}
 
-		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
+		Symbol* m_LhsSym;
+		const Symbol* m_RhsSym;
 	};
 
-	class BitwiseXor : public Instruction
+	class MulEqual : public MultiplicativeEqual
 	{
 	public:
-		BitwiseXor(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+		MulEqual(const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: MultiplicativeEqual(lhsSymName, rhsSymName, scope, OperationType::MulEqual)
+		{}
+		MulEqual(Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: MultiplicativeEqual(lhsSym, rhsSym, scope, OperationType::MulEqual)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class LessThan : public Instruction
+	class DivEqual : public MultiplicativeEqual
+	{
+	public:
+		DivEqual(const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: MultiplicativeEqual(lhsSymName, rhsSymName, scope, OperationType::DivEqual)
+		{}
+		DivEqual(Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: MultiplicativeEqual(lhsSym, rhsSym, scope, OperationType::DivEqual)
+		{}
+
+		bool PropagateConst() override;
+		void GenerateASM(std::ostream& o) override;
+	};
+#pragma endregion MultiplicativeEqual
+
+#pragma region Bitwise
+	class Bitwise : public Instruction
+	{
+	public:
+		bool PropagateConst() override = 0;
+		void GenerateASM(std::ostream& o) override = 0;
+
+	protected:
+		Bitwise(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope, OperationType op)
+			: Bitwise(scope->GetSymbol(resultSymName), scope->GetSymbol(lhsSymName), scope->GetSymbol(rhsSymName), scope, op)
+		{}
+		Bitwise(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope, OperationType op)
+			: Instruction(scope, op)
+			, m_ResultSym(resultSym)
+			, m_LhsSym(lhsSym)
+			, m_RhsSym(rhsSym)
+		{}
+
+		Symbol* m_ResultSym;
+		const Symbol* m_LhsSym;
+		const Symbol* m_RhsSym;
+	};
+
+	class BitwiseAnd : public Bitwise
+	{
+	public:
+		BitwiseAnd(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Bitwise(resultSymName, lhsSymName, rhsSymName, scope, OperationType::BitwiseAnd)
+		{}
+		BitwiseAnd(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Bitwise(resultSym, lhsSym, rhsSym, scope, OperationType::BitwiseAnd)
+		{}
+
+		bool PropagateConst() override;
+		void GenerateASM(std::ostream& o) override;
+	};
+
+	class BitwiseOr : public Bitwise
+	{
+	public:
+		BitwiseOr(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Bitwise(resultSymName, lhsSymName, rhsSymName, scope, OperationType::BitwiseOr)
+		{}
+		BitwiseOr(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Bitwise(resultSym, lhsSym, rhsSym, scope, OperationType::BitwiseOr)
+		{}
+
+		bool PropagateConst() override;
+		void GenerateASM(std::ostream& o) override;
+	};
+
+	class BitwiseXor : public Bitwise
+	{
+	public:
+		BitwiseXor(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope)
+			: Bitwise(resultSymName, lhsSymName, rhsSymName, scope, OperationType::BitwiseXor)
+		{}
+		BitwiseXor(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Bitwise(resultSym, lhsSym, rhsSym, scope, OperationType::BitwiseXor)
+		{}
+
+		bool PropagateConst() override;
+		void GenerateASM(std::ostream& o) override;
+	};
+#pragma endregion Bitwise
+
+#pragma region Comparison
+	class Comparison : public Instruction
+	{
+	public:
+		bool PropagateConst() override = 0;
+		void GenerateASM(std::ostream& o) override = 0;
+
+	protected:
+		Comparison(const std::string& resultSymName, const std::string& lhsSymName, const std::string& rhsSymName, Scope* scope, OperationType op)
+			: Comparison(scope->GetSymbol(resultSymName), scope->GetSymbol(lhsSymName), scope->GetSymbol(rhsSymName), scope, op)
+		{}
+		Comparison(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope, OperationType op)
+			: Instruction(scope, op)
+			, m_ResultSym(resultSym)
+			, m_LhsSym(lhsSym)
+			, m_RhsSym(rhsSym)
+		{}
+
+		Symbol* m_ResultSym;
+		const Symbol* m_LhsSym;
+		const Symbol* m_RhsSym;
+	};
+
+	class LessThan : public Comparison
 	{
 	public:
 		LessThan(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+			: Comparison(resultSymName, lhsSymName, rhsSymName,scope, OperationType::LessThan)
+		{}
+		LessThan(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Comparison(resultSym, lhsSym, rhsSym, scope, OperationType::LessThan)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class GreaterThan : public Instruction
+	class GreaterThan : public Comparison
 	{
 	public:
 		GreaterThan(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+			: Comparison(resultSymName, lhsSymName, rhsSymName, scope, OperationType::GreaterThan)
+		{}
+		GreaterThan(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Comparison(resultSym, lhsSym, rhsSym, scope, OperationType::GreaterThan)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class Equal : public Instruction
+	class Equal : public Comparison
 	{
 	public:
 		Equal(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+			: Comparison(resultSymName, lhsSymName, rhsSymName, scope, OperationType::Equal)
+		{}
+		Equal(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Comparison(resultSym, lhsSym, rhsSym, scope, OperationType::Equal)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class NotEqual : public Instruction
+	class NotEqual : public Comparison
 	{
 	public:
 		NotEqual(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+			: Comparison(resultSymName, lhsSymName, rhsSymName, scope, OperationType::NotEqual)
+		{}
+		NotEqual(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Comparison(resultSym, lhsSym, rhsSym, scope, OperationType::NotEqual)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class LessOrEqual : public Instruction
+	class LessOrEqual : public Comparison
 	{
 	public:
 		LessOrEqual(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+			: Comparison(resultSymName, lhsSymName, rhsSymName, scope, OperationType::LessOrEqual)
+		{}
+		LessOrEqual(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Comparison(resultSym, lhsSym, rhsSym, scope, OperationType::LessOrEqual)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
-	class GreaterOrEqual : public Instruction
+	class GreaterOrEqual : public Comparison
 	{
 	public:
 		GreaterOrEqual(std::string resultSymName, std::string lhsSymName, std::string rhsSymName, Scope* scope)
-			: Instruction(scope)
-			, m_ResultParamName(std::move(resultSymName))
-			, m_LhsParamName(std::move(lhsSymName))
-			, m_RhsParamName(std::move(rhsSymName))
+			: Comparison(resultSymName, lhsSymName, rhsSymName, scope, OperationType::GreaterOrEqual)
+		{}
+		GreaterOrEqual(Symbol* resultSym, const Symbol* lhsSym, const Symbol* rhsSym, Scope* scope)
+			: Comparison(resultSym, lhsSym, rhsSym, scope, OperationType::GreaterOrEqual)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-
-	private:
-		const std::string m_ResultParamName;
-		const std::string m_LhsParamName;
-		const std::string m_RhsParamName;
 	};
 
 	class Not : public Instruction
 	{
 	public:
-		Not(std::string tempSymName, std::string origSymName, Scope* scope)
-			: Instruction(scope), m_TempParamName(std::move(tempSymName)), m_OrigParamName(std::move(origSymName))
+		Not(const std::string& tempSymName, const std::string& origSymName, Scope* scope)
+			: Not(scope->GetSymbol(tempSymName), scope->GetSymbol(origSymName), scope)
+		{}
+		Not(const Symbol* tempSym, const Symbol* origSym, Scope* scope)
+			: Instruction(scope, OperationType::ExclamationMark)
+			, m_TempSym(tempSym)
+			, m_OrigSym(origSym)
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const std::string m_TempParamName;
-		const std::string m_OrigParamName;
+		const Symbol* m_TempSym;
+		const Symbol* m_OrigSym;
 	};
+#pragma endregion Comparison
 
 }

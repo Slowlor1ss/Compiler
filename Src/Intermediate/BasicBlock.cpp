@@ -28,6 +28,17 @@ void BasicBlock::AddInstr(Instruction* instr)
 	m_Instructions.emplace_back(instr)->SetBasicBlock(this);
 }
 
+void BasicBlock::OptimizeIR()
+{
+	for (auto i = m_Instructions.begin(); i != m_Instructions.end();)
+	{
+		if ((*i)->PropagateConst())
+			i = m_Instructions.erase(i);
+		else
+			++i;
+	}
+}
+
 void BasicBlock::GenerateX86(std::ostream& o) const
 {
 	for (auto* instr : m_Instructions)

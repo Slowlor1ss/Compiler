@@ -79,7 +79,7 @@ Symbol* Scope::AddSymbol(const Symbol& sym)
 Symbol* Scope::AddSymbol(const std::string& name, const std::string& varType, size_t varLine, int* constPtr)
 {
     m_StackPointer -= m_TypeSizes[varType];
-    const Symbol sym{ name, m_StackPointer, varType, varLine, false, true, false, constPtr };
+    const Symbol sym{ name, varType, varLine, m_StackPointer, constPtr, false };
     return &(m_SymbolMap[name] = sym);
 }
 

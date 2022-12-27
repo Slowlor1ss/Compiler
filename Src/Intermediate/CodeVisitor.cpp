@@ -324,8 +324,8 @@ std::any CodeVisitor::visitVarDeclr(antlrcpp::CricketParser::VarDeclrContext* ct
 		if (scope->CheckSymbolRedefinition(symName, ctx->getStart()->getLine(), m_ErrorLogger))
 			return EXIT_FAILURE;
 
-		scope->AddSymbol(symName, symType, ctx->getStart()->getLine());
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Declaration( symType, symName, scope));
+		const auto* sym = scope->AddSymbol(symName, symType, ctx->getStart()->getLine());
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Declaration(sym, scope));
 	}
 	return EXIT_SUCCESS;
 }
@@ -343,7 +343,7 @@ std::any CodeVisitor::visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAn
 		return EXIT_FAILURE;
 
 	// Declare symbol
-	scope->AddSymbol(lhsSymName, lhsSymType, ctx->getStart()->getLine());
+	auto* lhsSym = scope->AddSymbol(lhsSymName, lhsSymType, ctx->getStart()->getLine());
 
 	// Get curr sp
 	int currStackPointer = scope->GetStackPointer();
@@ -361,7 +361,7 @@ std::any CodeVisitor::visitVarDeclrAndAssign(antlrcpp::CricketParser::VarDeclrAn
 	// Set the sp back to previous value
 	scope->SetStackPointer(currStackPointer);
 
-	m_Cfg.CurrentBB()->AddInstr(new Operation::Assign(lhsSymName, rhsResult->varName, scope));
+	m_Cfg.CurrentBB()->AddInstr(new Operation::Assign(lhsSym, rhsResult, scope));
 
 	return EXIT_SUCCESS;
 }
@@ -389,10 +389,10 @@ std::any CodeVisitor::visitUnaryExpr(antlrcpp::CricketParser::UnaryExprContext* 
 	switch (ctx->UNARY->getType())
 	{
 	case CricketParser::ExclamationMark:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Not(resultTemp->varName, sym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Not(resultTemp, sym, scope));
 		break;
 	case CricketParser::Minus:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Negate(resultTemp->varName, sym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Negate(resultTemp, sym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported unary type: " + ctx->UNARY->toString(), ctx->getStart()->getLine());
@@ -416,13 +416,13 @@ std::any CodeVisitor::visitMulDivModExpr(antlrcpp::CricketParser::MulDivModExprC
 	switch (ctx->MULTIPLICATIVE->getType())
 	{
 	case CricketParser::Mul:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Mul(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Mul(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::Div:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Div(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Div(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::Mod:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Mod(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Mod(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->MULTIPLICATIVE->toString() + ", expected '*', '/', or '%'", ctx->getStart()->getLine());
@@ -447,10 +447,10 @@ std::any CodeVisitor::visitAddSubExpr(antlrcpp::CricketParser::AddSubExprContext
 	switch (ctx->ADDITIVE->getType())
 	{
 	case CricketParser::Minus:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Minus(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Minus(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::Plus:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Plus(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Plus(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->ADDITIVE->toString() + ", expected '-', or '+'", ctx->getStart()->getLine());
@@ -474,10 +474,10 @@ std::any CodeVisitor::visitCmpLessOrGreaterExpr(antlrcpp::CricketParser::CmpLess
 	switch (ctx->CMP->getType())
 	{
 	case CricketParser::LessThan:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::LessThan(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::LessThan(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::GreaterThan:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::GreaterThan(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::GreaterThan(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->CMP->toString() + ", expected '<', or '>'", ctx->getStart()->getLine());
@@ -501,10 +501,10 @@ std::any CodeVisitor::visitCmpEqualityExpr(antlrcpp::CricketParser::CmpEqualityE
 	switch (ctx->EQ->getType())
 	{
 	case CricketParser::Equal:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Equal(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Equal(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::NotEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::NotEqual(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::NotEqual(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->EQ->toString() + ", expected '==', or '!='", ctx->getStart()->getLine());
@@ -528,10 +528,10 @@ std::any CodeVisitor::visitCmpEqualityLessGreaterExpr(antlrcpp::CricketParser::C
 	switch (ctx->LGEQ->getType())
 	{
 	case CricketParser::LessOrEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::LessOrEqual(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::LessOrEqual(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::GreaterOrEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::GreaterOrEqual(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::GreaterOrEqual(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->LGEQ->toString() + ", expected '<=', or '>='", ctx->getStart()->getLine());
@@ -555,13 +555,13 @@ std::any CodeVisitor::visitBitwiseExpr(antlrcpp::CricketParser::BitwiseExprConte
 	switch (ctx->BITWISE->getType())
 	{
 	case CricketParser::BitwiseAnd:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::BitwiseAnd(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::BitwiseAnd(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::BitwiseOr:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::BitwiseOr(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::BitwiseOr(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	case CricketParser::BitwiseXor:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::BitwiseXor(resultTemp->varName, lhsSym->varName, rhsSym->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::BitwiseXor(resultTemp, lhsSym, rhsSym, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->BITWISE->toString() + ", expected '&', '|', or '^'", ctx->getStart()->getLine());
@@ -607,13 +607,13 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 	// Add instructions for all the parameters
 	for (size_t i = numParams - 1; i != size_t(-1); i--) 
 	{
-		m_Cfg.CurrentBB()->AddInstr(new Operation::WriteParam(params[i]->varName, i, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::WriteParam(params[i], i, scope));
 	}
 
 
 	// Create instruction for the function call
 	const Symbol* resultTemp = CreateTempSymbol(ctx, func->returnType);
-	m_Cfg.CurrentBB()->AddInstr(new Operation::Call(resultTemp->varName, funcName, numParams, scope));
+	m_Cfg.CurrentBB()->AddInstr(new Operation::Call(resultTemp, funcName, numParams, scope));
 	func->isCalled = true;
 	m_CurrentFunction->hasFuncCall = true;
 
@@ -644,7 +644,7 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 			// can be usefull for looking at what instructions are happening
 			if (!m_Cfg.GetOptimized())
-				m_Cfg.CurrentBB()->AddInstr(new Operation::WriteConst(resultTemp->varName, std::to_string(value), scope));
+				m_Cfg.CurrentBB()->AddInstr(new Operation::WriteConst(resultTemp, std::to_string(value), scope));
 
 			break;
 		}
@@ -663,7 +663,7 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 			// can be usefull for looking at what instructions are happening
 			if (!m_Cfg.GetOptimized())
-				m_Cfg.CurrentBB()->AddInstr(new Operation::WriteConst(resultTemp->varName, std::to_string(charLiteralValue), scope));
+				m_Cfg.CurrentBB()->AddInstr(new Operation::WriteConst(resultTemp, std::to_string(charLiteralValue), scope));
 
 			break;
 		}
@@ -715,10 +715,11 @@ std::any CodeVisitor::visitAssignExpr(antlrcpp::CricketParser::AssignExprContext
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody)
 	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { rhsResult });
 
+	auto* lhsSym = scope->GetSymbol(lhsName);
 	// Add the operation to save the expression into the variable 
-	m_Cfg.CurrentBB()->AddInstr(new Operation::Assign(lhsName, rhsResult->varName, scope));
-	//TODO: maybe needs a cpy?
-	return scope->GetSymbol(lhsName);
+	m_Cfg.CurrentBB()->AddInstr(new Operation::Assign(lhsSym, rhsResult, scope));
+	//TODO!: test case like a = b = c;
+	return lhsSym;
 }
 
 std::any CodeVisitor::visitPmmdEqual(antlrcpp::CricketParser::PmmdEqualContext* ctx)
@@ -729,21 +730,22 @@ std::any CodeVisitor::visitPmmdEqual(antlrcpp::CricketParser::PmmdEqualContext* 
 	if (!scope->HasSymbol(lhsName))
 		throw Unknown_Symbol(lhsName, ctx->getStart()->getLine());
 
+	Symbol* lhsSym = scope->GetSymbol(lhsName);
 	Symbol* rhsResult = std::any_cast<Symbol*>(visit(ctx->primaryExpr()));
 
 	switch (ctx->OPPMMD->getType())
 	{
 	case CricketParser::PlusEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::PlusEqual(lhsName, rhsResult->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::PlusEqual(lhsSym, rhsResult, scope));
 		break;
 	case CricketParser::MinusEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::MinusEqual(lhsName, rhsResult->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::MinusEqual(lhsSym, rhsResult, scope));
 		break;
 	case CricketParser::MulEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::MulEqual(lhsName, rhsResult->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::MulEqual(lhsSym, rhsResult, scope));
 		break;
 	case CricketParser::DivEqual:
-		m_Cfg.CurrentBB()->AddInstr(new Operation::DivEqual(lhsName, rhsResult->varName, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::DivEqual(lhsSym, rhsResult, scope));
 		break;
 	default:
 		throw Unsupported_Expression("Used unsupported operation type: " + ctx->OPPMMD->toString() + ", expected '+=', '-=', '*=', or '/='", ctx->getStart()->getLine());

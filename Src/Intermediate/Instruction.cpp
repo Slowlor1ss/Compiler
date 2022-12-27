@@ -1,13 +1,12 @@
 #include "Instruction.h"
 #include "BasicBlock.h"
 #include "../SymbolTable.h"
-#include "../Scope.h"
 #include "../ErrorHandeler.h"
 #include <cassert>
 #include <utility>
 #include <format>
 #include <iostream>
-
+#include "ControlFlowGraph.h"
 
 //https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
 
@@ -22,23 +21,23 @@ void Operation::Prologue::GenerateASM(std::ostream& o)
 	// .globl my_function, declares my_function as a global symbol, meaning it can be called from other files.
 	o << ".globl " << label << '\n';
 	// '.type' directive is used to specify the type of a symbol '@function' Indicates that the symbol is a function.
-	o << ".type	" << label << ", @function" << '\n';
+	o << ".type " << label << ", @function" << '\n';
 	// 'my_function:' labels the start of the function.
 	o << label << ":" << '\n';
 
-	o << FormatInstruction("pushq", "%rbp"); AddCommentToPrevInstruction(o, "Save the old base pointer");
-	o << FormatInstruction("movq", "%rsp", "%rbp"); AddCommentToPrevInstruction(o, "Set the base pointer to the current stack pointer");
+	o << FormatInstruction("pushq", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Save the old base pointer");
+	o << FormatInstruction("movq", "%rsp", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Set the base pointer to the current stack pointer");
 
 	// Keep the size a multiple of 16 for mem alignment reasons
 	const int size = RoundUpToMultipleOf16(m_Scope->GetScopeSize());
 	if (m_BasicBlock->GetFunction()->hasFuncCall && size > 0)
 	{
-		o << FormatInstruction("subq", "$" + std::to_string(size), "%rsp"); AddCommentToPrevInstruction(o, "Make room on the stack for local variables");
+		o << FormatInstruction("subq", "$" + std::to_string(size), "%rsp"); AddCommentToPrevInstruction(o, "[Prologue] Make room on the stack for local variables");
 	}
 }
 
 //https://scottc130.medium.com/implementing-functions-in-x86-assembly-a2fb7315e2e0
-void Operation::Return::GenerateASM(std::ostream& o)
+void Operation::Return::GenerateASM(std::ostream& o) //TODO: if the return of a function is a constptr then we can replace the whole function by a return of that value
 {
 	//check if we're actually returning anything
 	if (!m_ReturnParam.empty())
@@ -47,7 +46,7 @@ void Operation::Return::GenerateASM(std::ostream& o)
 		if (m_Scope->HasSymbol(m_ReturnParam))
 		{
 			const Symbol* source = m_Scope->GetSymbol(m_ReturnParam);
-			const std::string sourceLoc = source->constPtr ? "$" + std::to_string((*source->constPtr)) : source->GetOffsetReg();
+			const std::string sourceLoc = source->constPtr ? "$" + std::to_string(*source->constPtr) : source->GetOffsetReg();
 
 			o << FormatInstruction("movl", sourceLoc, "%eax");
 		}
@@ -73,11 +72,6 @@ void Operation::Return::GenerateASM(std::ostream& o)
 
 void Operation::Call::GenerateASM(std::ostream& o)
 {
-	//const std::string label = m_Params.at(0);
-	const Symbol* tempSym = m_Scope->GetSymbol(m_TempVarName);
-	//const int numParams = std::stoi(m_Params.at(1));
-
-	// Write ASM instructions
 	o << FormatInstruction("call", m_UniqueFuncName); AddCommentToPrevInstruction(o, "[Call]");
 	if (m_AmountOfParams > 6) //TODO: test this properly!
 	{
@@ -89,50 +83,48 @@ void Operation::Call::GenerateASM(std::ostream& o)
 	//save function return value
 	if (m_BasicBlock->GetFunction()->returnType != "void") //TODO: maybe unessesery as it might be optimized away anyway
 	{
-		o << FormatInstruction("movl", "%eax", tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Call] Save Func Return value into " + tempSym->varName);
+		o << FormatInstruction("movl", "%eax", m_Param->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Call] Save Func Return value into " + m_Param->varName);
 	}
 }
 
 void Operation::WriteParam::GenerateASM(std::ostream& o)
 {
-	const Symbol* givenParamSym = m_Scope->GetSymbol(m_ParamName); //load the value/symbol that's given as parameter to the function
-
 	// Use registers as long as there are available
 	if (m_ParamIdx < m_AmountOfRegisters)
 	{
 		//https://stackoverflow.com/questions/5134614/const-map-element-access
-		const std::string reg = m_TypeRegisterMap.at(givenParamSym->varType)[m_ParamIdx];
-		const std::string movInstr = (givenParamSym->varType == "char") ? "movb" : "movl";
+		const std::string reg = m_TypeRegisterMap.at(m_Sym->varType)[m_ParamIdx];
+		const std::string movInstr = (m_Sym->varType == "char") ? "movb" : "movl";
 
 		std::string param;
-		if (givenParamSym->constPtr)
-			param = '$' + std::to_string(*givenParamSym->constPtr);
+		if (m_Sym->constPtr)
+			param = '$' + std::to_string(*m_Sym->constPtr);
 		else
-			param = givenParamSym->GetOffsetReg();
+			param = m_Sym->GetOffsetReg();
 
 		//TODO: Test this for char's
 		// Move parameters in to registers
-		o << FormatInstruction(movInstr, param, reg); AddCommentToPrevInstruction(o, "[WriteParam] move param:" + givenParamSym->varName + " into " + reg);
+		o << FormatInstruction(movInstr, param, reg); AddCommentToPrevInstruction(o, "[WriteParam] move param:" + m_Sym->varName + " into " + reg);
 	}
 	// If we ran out of registers push parameters on the stack
 	else
 	{
 		//NOTE: THESE PUSH'S DON'T HAVE ANY POP'S
 		//2nd NOTE: (they don't need any as they will be overwritten by next function as the sp moves behind them (See: Instruction::Call))
-		if (givenParamSym->constPtr)
+		if (m_Sym->constPtr)
 		{
-			o << FormatInstruction("pushq", '$' + std::to_string(*givenParamSym->constPtr));
+			o << FormatInstruction("pushq", '$' + std::to_string(*m_Sym->constPtr));
 		}
 		else
 		{
-			if (givenParamSym->varType == "char")
+			if (m_Sym->varType == "char")
 			{
-				o << FormatInstruction("movzbl", givenParamSym->GetOffsetReg(), "%eax");
+				o << FormatInstruction("movzbl", m_Sym->GetOffsetReg(), "%eax");
 				o << FormatInstruction("pushq", "%rax");
 			}
 			else
 			{
-				o << FormatInstruction("pushq", givenParamSym->GetOffsetReg());
+				o << FormatInstruction("pushq", m_Sym->GetOffsetReg());
 			}
 
 		}
@@ -142,17 +134,14 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 
 void Operation::ReadParam::GenerateASM(std::ostream& o)
 {
-	//int currParamIdx = std::stoi(m_Params.at(1));
-	const Symbol* localParamSym = m_Scope->GetSymbol(m_ParamName);  //load the local symbol that's used as parameter of the function
-
 	// Use registers as long as there are available
 	if (m_ParamIdx < m_AmountOfRegisters) {
 
 		//https://stackoverflow.com/questions/5134614/const-map-element-access
-		const std::string reg = m_TypeRegisterMap.at(localParamSym->varType)[m_ParamIdx];
-		const std::string movInstr = (localParamSym->varType == "char") ? "movb" : "movl";
+		const std::string reg = m_TypeRegisterMap.at(m_Sym->varType)[m_ParamIdx];
+		const std::string movInstr = (m_Sym->varType == "char") ? "movb" : "movl";
 
-		o << FormatInstruction(movInstr, reg, localParamSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into param:" + localParamSym->varName);
+		o << FormatInstruction(movInstr, reg, m_Sym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into param:" + m_Sym->varName);
 	}
 	//TODO: cleanup
 	// If we ran out of registers don't do anything values are already in the right location
@@ -175,39 +164,69 @@ void Operation::ReadParam::GenerateASM(std::ostream& o)
 
 void Operation::WriteConst::GenerateASM(std::ostream& o)
 {
-	//const std::string constValueString = m_Params.at(0);
-	//const std::string tempSymName = m_Dest;
+	const bool isChar = m_Sym->varType == "char";
 
-	const Symbol* tempSym = m_Scope->GetSymbol(m_SymName);
-	const bool isChar = tempSym->varType == "char";
-
-	o << FormatInstruction(isChar ? "movb" : "movl", "$" + m_ValueString, tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[WriteConst] move " + m_ValueString + " into " + m_SymName);
+	o << FormatInstruction(isChar ? "movb" : "movl", "$" + m_ValueString, m_Sym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[WriteConst] move " + m_ValueString + " into " + m_Sym->varName);
 
 }
 
 #pragma region BasicOperations
+bool Operation::Assign::PropagateConst()
+{
+	// If it is a scope variable assign with a const
+	if (m_SourceSym->constPtr)
+	{
+		if constexpr (g_ConstPropagationAssignment)
+		{
+			m_DestSym->constPtr = new int(*m_SourceSym->constPtr);
+			return true;
+		}
+		else
+		{
+			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*m_SourceSym->constPtr), m_Scope));
+		}
+	}
+	// If the destination still has a constPtr but we assign a non const to it then destination should also no longer be const
+	else if(m_DestSym->constPtr)
+	{
+		delete m_DestSym->constPtr;
+		m_DestSym->constPtr = nullptr;
+	}
+	return false;
+}
+
 void Operation::Assign::GenerateASM(std::ostream& o)
 {
-	const Symbol* dest = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* source = m_Scope->GetSymbol(m_RhsParamName);
+	const std::pair<std::string, std::string> instPair = GetMoveInstr(m_DestSym->varType, m_SourceSym->varType);
+	const std::string reg = m_DestSym->varType == "int" ? "%eax" : "%al";
 
-	const std::pair<std::string, std::string> instPair = GetMoveInstr(dest->varType, source->varType);
-	const std::string reg = dest->varType == "int" ? "%eax" : "%al";
+	o << FormatInstruction(instPair.first, m_SourceSym->GetOffsetReg(), reg); AddCommentToPrevInstruction(o, "[Assign] move " + m_SourceSym->varName + " in accumulator");
+	o << FormatInstruction(instPair.second, reg, m_DestSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Assign] move accumulator in " + m_DestSym->varName);
+}
 
-	o << FormatInstruction(instPair.first, source->GetOffsetReg(), reg); AddCommentToPrevInstruction(o, "[Assign] move " + source->varName + " in accumulator");
-	o << FormatInstruction(instPair.second, reg, dest->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Assign] move accumulator in " + dest->varName);
+bool Operation::Declaration::PropagateConst()
+{
+	return true;
+}
+
+bool Operation::Negate::PropagateConst()
+{
+	if (m_OrigSym->constPtr)
+	{
+		const int res = -(*m_OrigSym->constPtr);
+		m_TempSym->constPtr = new int(res);
+		//TODO: maybe also delete origSym (will always be temp and set in write const) If we want to delete it add a delete sym to our scope
+		return true;
+	}
+	return false;
 }
 
 void Operation::Negate::GenerateASM(std::ostream& o)
 {
-	const Symbol* origSym = m_Scope->GetSymbol(m_OrigParamName);
-	const Symbol* tempSym = m_Scope->GetSymbol(m_TempParamName);
-
-
-	const std::string movInstr1 = origSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_OrigSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr2;
 	std::string reg2;
-	if (tempSym->varType == "char")
+	if (m_TempSym->varType == "char")
 	{
 		reg2 = "%al";
 		movInstr2 = "movb";
@@ -218,22 +237,49 @@ void Operation::Negate::GenerateASM(std::ostream& o)
 		movInstr2 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, origSym->GetOffsetReg(), "%eax"); AddCommentToPrevInstruction(o, "[Negate] copy original value to the accumulator");
+	o << FormatInstruction(movInstr1, m_OrigSym->GetOffsetReg(), "%eax"); AddCommentToPrevInstruction(o, "[Negate] copy original value to the accumulator");
 	o << FormatInstruction("negl", "%eax"); AddCommentToPrevInstruction(o, "[Negate] negate the accumulator");
-	o << FormatInstruction(movInstr2, reg2, tempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Negate] save negated value in " + tempSym->varName);
+	o << FormatInstruction(movInstr2, reg2, m_TempSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Negate] save negated value in " + m_TempSym->varName);
+}
+
+#pragma region Additive
+bool Operation::Additive::CheckObsoleteExpr() const
+{
+	// Check obsolete expression? (eg. x + 0 || x - 0 || 0 + x || etc...)
+	if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+	{
+		*m_ResultSym = *m_RhsSym;
+		return true;
+	}
+	else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+	{
+		*m_ResultSym = *m_LhsSym;
+		return true;
+	}
+	return false;
+}
+
+bool Operation::Plus::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr + *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		return CheckObsoleteExpr();
+	}
 }
 
 void Operation::Plus::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr3;
 	std::string reg3;
-	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -244,23 +290,33 @@ void Operation::Plus::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Plus] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Plus] move " + rhsSym->varName + " into EDX");
-	o << FormatInstruction("addl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Plus] add values together");
-	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Plus] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Plus] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Plus] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("addl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[Plus] add values together");
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Plus] save result into " + m_ResultSym->varName);
+}
+
+bool Operation::Minus::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr - *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		return CheckObsoleteExpr();
+	}
 }
 
 void Operation::Minus::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr3;
 	std::string reg3;
-	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -271,23 +327,64 @@ void Operation::Minus::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Minus] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Minus] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Minus] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Minus] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Minus] subtract values");
-	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Minus] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Minus] save result into " + m_ResultSym->varName);
+}
+#pragma endregion Additive
+#pragma region Multiplicative
+bool Operation::Mul::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr * *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		// Check obsolete expression? (eg. x * 1 || 1 * x || 0 * x || ...)
+		if (m_LhsSym->constPtr)
+		{
+			const int value = *m_LhsSym->constPtr;
+			if (value == 1)
+			{
+				*m_ResultSym = *m_RhsSym;
+				return true;
+			}
+			else if(value == 0)
+			{
+				m_ResultSym->constPtr = new int(0);
+				return true;
+			}
+		}
+		else if (m_RhsSym->constPtr)
+		{
+			const int value = *m_RhsSym->constPtr;
+			if (value == 1)
+			{
+				*m_ResultSym = *m_LhsSym;
+				return true;
+			}
+			else if (value == 0)
+			{
+				m_ResultSym->constPtr = new int(0);
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 void Operation::Mul::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr3;
 	std::string reg3;
-	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -298,94 +395,155 @@ void Operation::Mul::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Mul] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Mul] move " + rhsSym->varName + " into EDX");
-	o << FormatInstruction("imull", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Mul] multiply values");
-	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Mul] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Mul] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Mul] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("imull", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[Mul] multiply values");
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Mul] save result into " + m_ResultSym->varName);
+}
+
+bool Operation::Div::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr / *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		// Check obsolete expression? (eg. x / 1 || 0 / x )
+		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		{
+			m_ResultSym->constPtr = new int(0);
+			return true;
+		}
+		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 1)
+		{
+			*m_ResultSym = *m_LhsSym;
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void Operation::Div::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[Div] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Div] move " + m_LhsSym->varName + " into EAX");
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
-	if (rhsSym->varType == "char")
+	if (m_RhsSym->varType == "char")
 	{
-		o << FormatInstruction("movsbl", rhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[Div] move " + rhsSym->varName + " into ECX");
+		o << FormatInstruction("movsbl", m_RhsSym->GetOffsetReg(), "%ecx");	AddCommentToPrevInstruction(o, "[Div] move " + m_RhsSym->varName + " into ECX");
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
 	}
 	else
 	{
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", rhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
+		o << FormatInstruction("idivl", m_RhsSym->GetOffsetReg());					AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
 	}
 
 
-	if (resultSym->varType == "char")
+	if (m_ResultSym->varType == "char")
 	{
-		o << FormatInstruction("movb", "%al", resultSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[Div] save result into " + resultSym->varName);
+		o << FormatInstruction("movb", "%al", m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Div] save result into " + m_ResultSym->varName);
 	}
 	else
 	{
-		o << FormatInstruction("movl", "%eax", resultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Div] save result into " + resultSym->varName);
+		o << FormatInstruction("movl", "%eax", m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Div] save result into " + m_ResultSym->varName);
 	}
+}
+
+bool Operation::Mod::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr % *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		// Check obsolete expression? (eg. x % 0)
+		if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+		{
+			*m_ResultSym = *m_LhsSym;
+			return true;
+		}
+	}
+
+	return false;
 }
 
 void Operation::Mod::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[Mod] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Mod] move " + m_LhsSym->varName + " into EAX");
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
-	if (rhsSym->varType == "char")
+	if (m_RhsSym->varType == "char")
 	{
-		o << FormatInstruction("movsbl", rhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[Mod] move " + rhsSym->varName + " into ECX");
+		o << FormatInstruction("movsbl", m_RhsSym->GetOffsetReg(), "%ecx");	AddCommentToPrevInstruction(o, "[Mod] move " + m_RhsSym->varName + " into ECX");
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
 	}
 	else
 	{
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", rhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
+		o << FormatInstruction("idivl", m_RhsSym->GetOffsetReg());					AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
 	}
 
 
-	if (resultSym->varType == "char")
+	if (m_ResultSym->varType == "char")
 	{
 		o << FormatInstruction("movl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Mod] mov result in to EAX so we can do an movb operation");
-		o << FormatInstruction("movb", "%al", resultSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[Mod] save result into " + resultSym->varName);
+		o << FormatInstruction("movb", "%al", m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Mod] save result into " + m_ResultSym->varName);
 	}
 	else
 	{
-		o << FormatInstruction("movl", "%edx", resultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Mod] save result into " + resultSym->varName);
+		o << FormatInstruction("movl", "%edx", m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Mod] save result into " + m_ResultSym->varName);
 	}
+}
+
+#pragma endregion Multiplicative
+#pragma region AdditiveEqual
+
+bool Operation::PlusEqual::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr + *m_RhsSym->constPtr;
+		m_LhsSym->constPtr = new int(res);
+		return true;
+	}
+	// Check obsolete expression?
+	else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+	{
+		return true;
+	}
+	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
+	else if (m_LhsSym->constPtr)
+	{
+		delete m_LhsSym->constPtr;
+		m_LhsSym->constPtr = nullptr;
+	}
+	return false;
 }
 
 void Operation::PlusEqual::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 
 	std::string movInstr3;
 	std::string reg3;
-	if (lhsSym->varType == "char")
+	if (m_LhsSym->varType == "char")
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -396,23 +554,42 @@ void Operation::PlusEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("addl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[PlusEqual] add values together");
-	o << FormatInstruction(movInstr3, reg3, lhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[PlusEqual] save result into " + lhsSym->varName);
+	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[PlusEqual] save result into " + m_LhsSym->varName);
+}
+
+bool Operation::MinusEqual::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr - *m_RhsSym->constPtr;
+		m_LhsSym->constPtr = new int(res);
+		return true;
+	}
+	// Check obsolete expression?
+	else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+	{
+		return true;
+	}
+	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
+	else if (m_LhsSym->constPtr)
+	{
+		delete m_LhsSym->constPtr;
+		m_LhsSym->constPtr = nullptr;
+	}
+	return false;
 }
 
 void Operation::MinusEqual::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 
 	std::string movInstr3;
 	std::string reg3;
-	if (lhsSym->varType == "char")
+	if (m_LhsSym->varType == "char")
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -423,23 +600,58 @@ void Operation::MinusEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MinusEqual] add values together");
-	o << FormatInstruction(movInstr3, reg3, lhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MinusEqual] save result into " + lhsSym->varName);
+	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MinusEqual] save result into " + m_LhsSym->varName);
+}
+#pragma endregion AdditiveEqual
+#pragma region MultiplicativeEqual
+bool Operation::MulEqual::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr * *m_RhsSym->constPtr;
+		m_LhsSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		// Check obsolete expression?
+		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		{
+			return true;
+		}
+		else if (m_RhsSym->constPtr)
+		{
+			const int value = *m_RhsSym->constPtr;
+			if (value == 1)
+				return true;
+			else if (value == 0)
+			{
+				m_LhsSym->constPtr = new int(0); //TODO: check if this is ok and make sure the lhs doesnt stay a const when its edited later
+				return true;
+			}
+		}
+		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
+		else if (m_LhsSym->constPtr)
+		{
+			delete m_LhsSym->constPtr;
+			m_LhsSym->constPtr = nullptr;
+		}
+	}
+
+	return false;
 }
 
 void Operation::MulEqual::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 
 	std::string movInstr3;
 	std::string reg3;
-	if (lhsSym->varType == "char")
+	if (m_LhsSym->varType == "char")
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -450,60 +662,97 @@ void Operation::MulEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MulEqual] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MulEqual] move " + rhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MulEqual] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MulEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("imull", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MulEqual] add values together");
-	o << FormatInstruction(movInstr3, reg3, lhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MulEqual] save result into " + lhsSym->varName);
+	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MulEqual] save result into " + m_LhsSym->varName);
+}
+
+bool Operation::DivEqual::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr / *m_RhsSym->constPtr;
+		m_LhsSym->constPtr = new int(res);
+		return true;
+	}
+	else
+	{
+		// Check obsolete expression?
+		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+			return true;
+		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 1)
+			return true;
+		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
+		else if (m_LhsSym->constPtr)
+		{
+			delete m_LhsSym->constPtr;
+			m_LhsSym->constPtr = nullptr;
+		}
+	}
+
+	return false;
 }
 
 void Operation::DivEqual::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[DivEqual] move " + lhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[DivEqual] move " + m_LhsSym->varName + " into EAX");
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
-	if (rhsSym->varType == "char")
+	if (m_RhsSym->varType == "char")
 	{
-		o << FormatInstruction("movsbl", rhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[DivEqual] move " + rhsSym->varName + " into ECX");
+		o << FormatInstruction("movsbl", m_RhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[DivEqual] move " + m_RhsSym->varName + " into ECX");
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
 	}
 	else
 	{
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", rhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
+		o << FormatInstruction("idivl", m_RhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
 	}
 
 
-	if (lhsSym->varType == "char")
+	if (m_LhsSym->varType == "char")
 	{
-		o << FormatInstruction("movb", "%al", lhsSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[DivEqual] save result into " + lhsSym->varName);
+		o << FormatInstruction("movb", "%al", m_LhsSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[DivEqual] save result into " + m_LhsSym->varName);
 	}
 	else
 	{
-		o << FormatInstruction("movl", "%eax", lhsSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[DivEqual] save result into " + lhsSym->varName);
+		o << FormatInstruction("movl", "%eax", m_LhsSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[DivEqual] save result into " + m_LhsSym->varName);
 	}
 }
+#pragma endregion MultiplicativeEqual
 #pragma endregion BasicOperations
 
 #pragma region BitwiseOperations
+bool Operation::BitwiseAnd::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr & *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	// Check obsolete expression?
+	else if ((m_LhsSym->constPtr && *m_LhsSym->constPtr == 0) || (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0))
+	{
+		m_ResultSym->constPtr = new int(0);
+		return true;
+	}
+	return false;
+}
+
 void Operation::BitwiseAnd::GenerateASM(std::ostream& o)
 {
 	//TODO: Could be improved I think same for or and xor
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr3;
 	std::string reg3;
-	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -514,23 +763,44 @@ void Operation::BitwiseAnd::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + rhsSym->varName + " into EDX");
-	o << FormatInstruction("andl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[BitwiseAnd] bitwise AND op");
-	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseAnd] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("andl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[BitwiseAnd] bitwise AND op");
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseAnd] save result into " + m_ResultSym->varName);
+}
+
+bool Operation::BitwiseOr::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr | *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	// Check obsolete expression?
+	else
+	{
+		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		{
+			*m_ResultSym = *m_RhsSym;
+			return true;
+		}
+		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+		{
+			*m_ResultSym = *m_LhsSym;
+			return true;
+		}
+	}
+	return false;
 }
 
 void Operation::BitwiseOr::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr3;
 	std::string reg3;
-	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -541,23 +811,44 @@ void Operation::BitwiseOr::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + rhsSym->varName + " into EDX");
-	o << FormatInstruction("orl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[BitwiseOr] bitwise OR op");
-	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseOr] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("orl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[BitwiseOr] bitwise OR op");
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseOr] save result into " + m_ResultSym->varName);
+}
+
+bool Operation::BitwiseXor::PropagateConst()
+{
+	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	{
+		const int res = *m_LhsSym->constPtr ^ *m_RhsSym->constPtr;
+		m_ResultSym->constPtr = new int(res);
+		return true;
+	}
+	// Check obsolete expression?
+	else
+	{
+		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		{
+			*m_ResultSym = *m_RhsSym;
+			return true;
+		}
+		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+		{
+			*m_ResultSym = *m_LhsSym;
+			return true;
+		}
+	}
+	return false;
 }
 
 void Operation::BitwiseXor::GenerateASM(std::ostream& o)
 {
-	const Symbol* lhsSym = m_Scope->GetSymbol(m_LhsParamName);
-	const Symbol* rhsSym = m_Scope->GetSymbol(m_RhsParamName);
-	const Symbol* resultSym = m_Scope->GetSymbol(m_ResultParamName);
-
-	const std::string movInstr1 = lhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = rhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
 	std::string movInstr3;
 	std::string reg3;
-	if (resultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
 	{
 		reg3 = "%al";
 		movInstr3 = "movb";
@@ -568,18 +859,28 @@ void Operation::BitwiseXor::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, lhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + lhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + rhsSym->varName + " into EDX");
-	o << FormatInstruction("xorl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[BitwiseXor] bitwise XOR op");
-	o << FormatInstruction(movInstr3, reg3, resultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseXor] save result into " + resultSym->varName);
+	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("xorl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[BitwiseXor] bitwise XOR op");
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseXor] save result into " + m_ResultSym->varName);
 }
 #pragma endregion BitwiseOperations
 
 //TODO: implement assembly of branch related stuff when adding branch related stuff
 #pragma region cmpOperations
+bool Operation::LessThan::PropagateConst()
+{
+	return false;
+}
+
 void Operation::LessThan::GenerateASM(std::ostream& o)
 {
 	throw NotImplementedException();
+}
+
+bool Operation::GreaterThan::PropagateConst()
+{
+	return false;
 }
 
 void Operation::GreaterThan::GenerateASM(std::ostream& o)
@@ -587,9 +888,19 @@ void Operation::GreaterThan::GenerateASM(std::ostream& o)
 	throw NotImplementedException();
 }
 
+bool Operation::Equal::PropagateConst()
+{
+	return false;
+}
+
 void Operation::Equal::GenerateASM(std::ostream& o)
 {
 	throw NotImplementedException();
+}
+
+bool Operation::NotEqual::PropagateConst()
+{
+	return false;
 }
 
 void Operation::NotEqual::GenerateASM(std::ostream& o)
@@ -597,14 +908,29 @@ void Operation::NotEqual::GenerateASM(std::ostream& o)
 	throw NotImplementedException();
 }
 
+bool Operation::LessOrEqual::PropagateConst()
+{
+	return false;
+}
+
 void Operation::LessOrEqual::GenerateASM(std::ostream& o)
 {
 	throw NotImplementedException();
 }
 
+bool Operation::GreaterOrEqual::PropagateConst()
+{
+	return false;
+}
+
 void Operation::GreaterOrEqual::GenerateASM(std::ostream& o)
 {
 	throw NotImplementedException();
+}
+
+bool Operation::Not::PropagateConst()
+{
+	return false;
 }
 
 void Operation::Not::GenerateASM(std::ostream& o)
