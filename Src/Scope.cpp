@@ -14,10 +14,6 @@ Scope::Scope(const int sP, Scope* parent) : m_StackPointer(sP), m_EnclosingScope
 
 Scope::~Scope()
 {
-    for (const auto& var : m_SymbolMap) 
-    {
-        delete(var.second.constPtr);
-    }
 }
 
 bool Scope::HasSymbol(const std::string& name) const
@@ -49,7 +45,7 @@ Symbol* Scope::GetSymbol(const std::string& name)
     }
     else if (m_EnclosingScope != nullptr)
     {
-        m_EnclosingScope->GetSymbol(name);
+        return m_EnclosingScope->GetSymbol(name);
     }
 
 	return nullptr; //TODO!: maybe throw error here and remove all then useless checks but watch ut where the check and where the get happens
@@ -76,10 +72,10 @@ Symbol* Scope::AddSymbol(const Symbol& sym)
     return &(m_SymbolMap[sym.varName] = sym);
 }
 
-Symbol* Scope::AddSymbol(const std::string& name, const std::string& varType, size_t varLine, int* constPtr)
+Symbol* Scope::AddSymbol(const std::string& name, const std::string& varType, size_t varLine, std::optional<int> constVal)
 {
     m_StackPointer -= m_TypeSizes[varType];
-    const Symbol sym{ name, varType, varLine, m_StackPointer, constPtr, false };
+    const Symbol sym{ name, varType, varLine, m_StackPointer, constVal, false };
     return &(m_SymbolMap[name] = sym);
 }
 

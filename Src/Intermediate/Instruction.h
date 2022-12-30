@@ -52,7 +52,9 @@ public:
 		DivEqual,
 		ExclamationMark,
 		Negate,
-		_LAST = Negate
+		ConditionalJump,
+		UnconditionalJump,
+		_LAST = UnconditionalJump
 	};
 
 	virtual ~Instruction() = default;
@@ -121,11 +123,11 @@ namespace Operation
 			: Instruction(scope, OperationType::Return), m_ReturnParam(std::move(returnParam))
 		{}
 
-		bool PropagateConst() override { return false; }
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const std::string m_ReturnParam;
+		std::string m_ReturnParam;
 	};
 
 	class Call : public Instruction
@@ -162,12 +164,13 @@ namespace Operation
 			, m_ParamIdx(paramIdx)
 		{}
 
-		bool PropagateConst() override { return false; }
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
 
 	private:
 		const Symbol* m_Sym;
 		const size_t m_ParamIdx;
+		std::optional<int> m_ConstVal{}; // Used in case the return value is const so we can save that value without it changing
 	};
 
 	class ReadParam : public Instruction
@@ -203,8 +206,8 @@ namespace Operation
 			, m_ValueString(std::move(valueSting))
 		{}
 
+		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
-		bool PropagateConst() override { return false; }
 
 	private:
 		const Symbol* m_Sym;
@@ -214,10 +217,10 @@ namespace Operation
 	class Assign : public Instruction
 	{
 	public:
-		Assign(const std::string& destSymName, const std::string& sourceSymName, Scope* scope)
+		Assign(const std::string& destSymName, std::string& sourceSymName, Scope* scope)
 			: Assign(scope->GetSymbol(destSymName), scope->GetSymbol(sourceSymName), scope)
 		{}
-		Assign(Symbol* destSym, const Symbol* sourceSym, Scope* scope)
+		Assign(Symbol* destSym, Symbol* sourceSym, Scope* scope)
 			: Instruction(scope, OperationType::Assign)
 			, m_DestSym(destSym)
 			, m_SourceSym(sourceSym)
@@ -230,7 +233,7 @@ namespace Operation
 
 	private:
 		Symbol* m_DestSym;
-		const Symbol* m_SourceSym;
+		Symbol* m_SourceSym;
 	};
 
 	class Declaration : public Instruction
@@ -686,5 +689,42 @@ namespace Operation
 		const Symbol* m_OrigSym;
 	};
 #pragma endregion Comparison
+
+	class ConditionalJump : public Instruction
+	{
+	public:
+		ConditionalJump(const std::string& conditionSymName, std::string exitTrueLabel, std::string exitFalseLabel, Scope* scope)
+			: ConditionalJump(scope->GetSymbol(conditionSymName), std::move(exitTrueLabel), std::move(exitFalseLabel), scope)
+		{}
+		ConditionalJump(Symbol* conditionSym, std::string exitTrueLabel, std::string exitFalseLabel, Scope* scope)
+			: Instruction(scope, OperationType::ConditionalJump)
+			, m_ConditionSym(conditionSym)
+			, m_ExitTrueLabel(std::move(exitTrueLabel))
+			, m_ExitFalseLabel(std::move(exitFalseLabel))
+		{}
+
+		bool PropagateConst() override;
+		void GenerateASM(std::ostream& o) override;
+
+	private:
+		const Symbol* m_ConditionSym;
+		const std::string m_ExitTrueLabel;
+		const std::string m_ExitFalseLabel;
+	};
+
+	class UnconditionalJump : public Instruction
+	{
+	public:
+		UnconditionalJump(std::string exitTrueLabel, Scope* scope)
+			: Instruction(scope, OperationType::UnconditionalJump)
+			, m_ExitTrueLabel(std::move(exitTrueLabel))
+		{}
+
+		bool PropagateConst() override;
+		void GenerateASM(std::ostream& o) override;
+
+	private:
+		const std::string m_ExitTrueLabel;
+	};
 
 }

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <optional>
 
 class ErrorLogger;
 class SymbolTable;
@@ -11,12 +12,12 @@ class SymbolTable;
 //TODO: maybe make a private constructor and destructor or one that can only be accesed by scope
 struct Symbol //TODO: chnage types to an enum as thatll probably be better than compairing strings all the time
 {
-	std::string varName;		// Defined name for symbol (also used to check if a symbol isn't defined twice)
-	std::string varType;		// The type (int, char, void, ...)
-	size_t varLine{};			// The lineNr where the symbol was declared
-	int memoryOffset{};			// Offset to base pointer (used to find where the value is stored) 
-	int* constPtr{};  			// Pointer to the value in case its a constant literal
-	bool isUsed{false};			// Sort of dirty flag checks whether the variable is used in the code
+	std::string varName;			// Defined name for symbol (also used to check if a symbol isn't defined twice)
+	std::string varType;			// The type (int, char, void, ...)
+	size_t varLine{};				// The lineNr where the symbol was declared
+	int memoryOffset{};				// Offset to base pointer (used to find where the value is stored) 
+	std::optional<int> constVal{};  // hold the const value if any | One of the main benefits of std::optional is that it uses a small object optimization (SOO) to store the value it holds
+	bool isUsed{false};				// Sort of dirty flag checks whether the variable is used in the code
 
 	/// Returns a string that represents the location of the variable
 	/// @return "memOffset(%rbp)" */
@@ -50,7 +51,7 @@ public:
 	Symbol* GetSymbol(const std::string& name);
 	Function* GetFunc(const std::string& name);
 
-	Symbol* AddSymbol(const std::string& name, const std::string& varType, size_t varLine, int* constPtr = nullptr);
+	Symbol* AddSymbol(const std::string& name, const std::string& varType, size_t varLine, std::optional<int> constVal = {});
 	Function* AddFunc(const std::string& name, std::string retType, size_t nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, size_t funcLine);
 
 	const Scope* GetEnclosingScope() const;
@@ -84,7 +85,7 @@ private:
 	std::unordered_map<std::string, Symbol> m_SymbolMap;
 	std::unordered_map<std::string, Function> m_FuncMap;
 
-	std::map<std::string_view, int> m_TypeSizes{ {"int", 4}, {"char", 1} };
+	std::unordered_map<std::string_view, int> m_TypeSizes{ {"int", 4}, {"char", 1} };
 
 };
 

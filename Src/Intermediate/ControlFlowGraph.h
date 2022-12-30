@@ -12,7 +12,9 @@ public:
 	~ControlFlowGraph();
 
 	BasicBlock* CreateNewCurrBB(Function* fn);
-	//BasicBlock* CreateNewCurrBB(Function* fn);
+	BasicBlock* CreateNewStatementBB(Function* fn);
+
+	void RemoveBasicBlock(std::string label);
 
 	bool GetOptimized() const { return m_Optimized; }
 	void SetOptimized(bool o) { m_Optimized = o; }
@@ -32,4 +34,7 @@ private:
 };
 
 //TODO: remove these globals and make some settings
-constexpr bool g_ConstPropagationAssignment{ false };
+constexpr bool g_ConstPropagationAssignment{ true };
+constexpr bool g_OptimizeConstPropagation{ true };
+constexpr bool g_RemoveConstConditionals{ true };
+constexpr bool g_OptimizeASM{ true };

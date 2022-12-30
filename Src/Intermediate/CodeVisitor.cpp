@@ -65,10 +65,10 @@ void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const
 }
 
 //TODO: add optional parameter for better name and combine tempSymX and name
-Symbol* CodeVisitor::CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, int* constPtr)
+Symbol* CodeVisitor::CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, std::optional<int> constVal)
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
-	Symbol* sym  = scope->AddSymbol("[TempSym_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constPtr);
+	Symbol* sym  = scope->AddSymbol("[Temp_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constVal);
 	sym->isUsed = true;
 
 	return sym;
@@ -168,7 +168,17 @@ std::any CodeVisitor::visitEndBlock(antlrcpp::CricketParser::EndBlockContext* ct
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 	scope->CheckUnusedSymbols(m_ErrorLogger);
 
-	//TODO: if (haha get it "if") I implement if and else statements add exit true and false conditionals
+	BasicBlock* currBB = m_Cfg.CurrentBB();
+
+#ifdef _DEBUG
+	if (currBB->GetExitFalse()) 
+	{
+		assert(!"Should never reach this"); //!string == false
+		//currBB->AddInstr(new Operation::ConditionalJump(conditionResult, currBB->GetExitTrue()->GetLabel(), currBB->GetExitFalse()->GetLabel(), scope));
+	}
+#endif
+	if (currBB->GetExitTrue())
+		currBB->AddInstr(new Operation::UnconditionalJump(currBB->GetExitTrue()->GetLabel(), scope));
 
 	// Remove scope from the scope stack
 	m_GlobalSymbolTable->PopScope();
@@ -639,7 +649,7 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 				m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine());
 			}
 
-			resultTemp = CreateTempSymbol(ctx, "int", new int(value));
+			resultTemp = CreateTempSymbol(ctx, "int", value);
 
 			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 			// can be usefull for looking at what instructions are happening
@@ -658,7 +668,7 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 			// Do [1] to skip the surrounding '
 			const int charLiteralValue = ctx->getText()[1]; //TODO: test a char like: char c = '\''
 
-			resultTemp = CreateTempSymbol(ctx, "char", new int(charLiteralValue));
+			resultTemp = CreateTempSymbol(ctx, "char", charLiteralValue);
 
 			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 			// can be usefull for looking at what instructions are happening
@@ -756,21 +766,166 @@ std::any CodeVisitor::visitPmmdEqual(antlrcpp::CricketParser::PmmdEqualContext* 
 
 #pragma endregion Assign
 
-//TODO: Implement
 #pragma region Statements
 std::any CodeVisitor::visitIfStatement(antlrcpp::CricketParser::IfStatementContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+
+	Symbol* conditionResult = std::any_cast<Symbol*>(visit(ctx->expr(0)));
+
+	BasicBlock* origExitTrue = m_Cfg.CurrentBB()->GetExitTrue();
+	BasicBlock* origExitFalse = m_Cfg.CurrentBB()->GetExitFalse();
+
+	BasicBlock* conditionBB = m_Cfg.CurrentBB();
+	BasicBlock* bodyBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+	// We dont create end if here so that it will always be created after else bb as this has an effect on the order of the generated code
+	// and while it will still work if its created befor the else its less optimized as propagate const wont know what happens in the else
+	BasicBlock* endIfBB;// = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+
+	// If its true go inside the body
+	conditionBB->SetExitTrue(bodyBB);
+
+	// If there's also an else statement
+	if (ctx->elseStatement()) {
+
+		BasicBlock* elseBodyBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+
+		// If False go inside the false body
+		conditionBB->SetExitFalse(elseBodyBB);
+
+		endIfBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+		elseBodyBB->SetExitTrue(endIfBB);
+
+		conditionBB->AddInstr(new Operation::ConditionalJump(conditionResult, conditionBB->GetExitTrue()->GetLabel(), conditionBB->GetExitFalse()->GetLabel(), scope));
+
+		// Visit else body
+		m_Cfg.SetCurrentBB(elseBodyBB);
+		visit(ctx->elseStatement());
+	}
+	else {
+		endIfBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+		// If false just skip the true body and go to the end of the if
+		conditionBB->SetExitFalse(endIfBB);
+
+		conditionBB->AddInstr(new Operation::ConditionalJump(conditionResult, conditionBB->GetExitTrue()->GetLabel(), conditionBB->GetExitFalse()->GetLabel(), scope));
+	}
+
+	// Set its exit pointers to the ones of the parent BB
+	endIfBB->SetExitTrue(origExitTrue);
+	endIfBB->SetExitFalse(origExitFalse);
+
+	bodyBB->SetExitTrue(endIfBB);
+
+	m_Cfg.SetCurrentBB(bodyBB);
+	// If statement with body
+	if (ctx->body()) {
+		visit(ctx->beginBlock());
+		visit(ctx->body());
+		visit(ctx->endBlock());
+	}
+	// If statement without {}
+	else if (ctx->expr(1))
+	{
+		visit(ctx->expr(1));
+		// Write instruction to jump back to the following block
+		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+	}
+	// If statement directly followed by a flow control statement like return, break, or continue
+	else if (ctx->flowControl()) //TODO: test properly
+	{
+		visit(ctx->flowControl());
+		// Write instruction to jump back to the following block
+		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+	}
+
+	// Set the next current BB
+	m_Cfg.SetCurrentBB(endIfBB);
+
+	return EXIT_SUCCESS;
 }
 
 std::any CodeVisitor::visitElseStatement(antlrcpp::CricketParser::ElseStatementContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+	BasicBlock* elseBodyBB = m_Cfg.CurrentBB();
+
+	// Else statement with body
+	if (ctx->body()) {
+		visit(ctx->beginBlock());
+		visit(ctx->body());
+		visit(ctx->endBlock());
+	}
+	// Else statement without {}
+	else if (ctx->expr())
+	{
+		visit(ctx->expr());
+		elseBodyBB->AddInstr(new Operation::UnconditionalJump(elseBodyBB->GetExitTrue()->GetLabel(), scope));
+	}
+	// Else statement directly followed by a flow control statement like return, break, or continue
+	else if (ctx->flowControl())
+	{
+		visit(ctx->flowControl());
+		elseBodyBB->AddInstr(new Operation::UnconditionalJump(elseBodyBB->GetExitTrue()->GetLabel(), scope));
+	}
+
+	return EXIT_SUCCESS;
 }
 
 std::any CodeVisitor::visitWhileStatement(antlrcpp::CricketParser::WhileStatementContext* ctx)
 {
-	return std::any();
+	Scope* scope = m_GlobalSymbolTable->CurrentScope();
+
+	BasicBlock* beforeWhileBB = m_Cfg.CurrentBB();
+
+	BasicBlock* bodyBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+
+	BasicBlock* conditionBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction); // We create a separate bb for the condition -> while(...)
+	m_Cfg.SetCurrentBB(conditionBB);
+	Symbol* conditionResult = std::any_cast<Symbol*>(visit(ctx->expr(0)));
+
+	BasicBlock* afterWhileBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
+
+	// Set its exit pointers to the ones of the parent BB
+	afterWhileBB->SetExitTrue(beforeWhileBB->GetExitTrue());
+	afterWhileBB->SetExitFalse(beforeWhileBB->GetExitFalse());
+
+	beforeWhileBB->SetExitTrue(conditionBB);
+
+	conditionBB->SetExitTrue(bodyBB);
+	conditionBB->SetExitFalse(afterWhileBB);
+
+	bodyBB->SetExitTrue(conditionBB);
+
+
+	m_Cfg.SetCurrentBB(bodyBB);
+	if (ctx->body()) {
+		visit(ctx->beginBlock());
+		visit(ctx->body());
+		visit(ctx->endBlock());
+	}
+	else if (ctx->expr(1))
+		visit(ctx->expr(1));
+	else if (ctx->flowControl())
+		visit(ctx->flowControl());
+
+	beforeWhileBB->AddInstr(new Operation::UnconditionalJump(beforeWhileBB->GetExitTrue()->GetLabel(), scope));
+	//TODO: maybe unnecessary jump
+	bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+	conditionBB->AddInstr(new Operation::ConditionalJump(conditionResult, conditionBB->GetExitTrue()->GetLabel(), conditionBB->GetExitFalse()->GetLabel(), scope));
+	// NOTE: actually depends on in what order the basic blacks have been added as these are instructions added to different basic blocks
+	// Example of how it will look in assembly
+	//		(...)
+	//		jmp.L2					#jump to the comparision
+	//	.L3:						#body
+	//		addl    $1, -4(% rbp)	#do whatever in the body
+	//	.L2:						#comparison
+	//		cmpl    $0, -4(% rbp) 
+	//		jne.L3					#if its true jump to the body else just continue
+	//		(...)
+
+	m_Cfg.SetCurrentBB(afterWhileBB);
+
+	return EXIT_SUCCESS;
 }
 #pragma endregion Statements
 

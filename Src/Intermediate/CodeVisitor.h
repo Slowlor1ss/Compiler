@@ -1,6 +1,7 @@
 #pragma once
 #include "antlr4-runtime.h"
 #include "CricketBaseVisitor.h"
+#include <optional>
 
 struct Symbol;
 struct Function;
@@ -54,7 +55,7 @@ private:
 
 	void AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const;
 	//creates a temp symbol and adds it to the sym list of the current scope
-	Symbol* CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, int* constPtr = nullptr);
+	Symbol* CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, std::optional<int> constPtr = {});
 	std::string GetFuncUniqueName(std::string funcName, const std::vector<std::string>& paramTypes);
 	std::string GetFuncUniqueName(std::string funcName, const std::vector<Symbol*>& symbols);
 	// Throws if one of the symbols has void as type

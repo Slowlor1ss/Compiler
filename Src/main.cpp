@@ -16,13 +16,17 @@ using namespace antlr4;
 int main(int argc, char* argv[])
 {
 	ErrorLogger errorLogger{};
-	try
-	{
+	//try
+	//{
 		ControlFlowGraph controlFlowGraph{true};
 
 		//ANTLRInputStream input("a + (x * (y ? 0 : 1) + z);");
 		//ANTLRInputStream input("b+c*d; (b+c)*d;");
-		ANTLRInputStream input("void main()\n{\n\tint a;\n\tint b = 3;\n\tint c = a + b;\n}");
+		//ANTLRInputStream input("void main()\n{\n\tint a = 1;\n\tint b = 3;\n\tint c = a + b;\n}");
+		//ANTLRInputStream input("void main()\n{\n\tint a;\n\treturn a;\n}");
+	//const prop test with if
+	//ANTLRInputStream input("int main()\n{\n     int x = 2;\n     int y = x;\n     if(x)\n     {\n        x = 3;\n        if(x)\n          y = x;\n     }\n     return x;\n}");
+	ANTLRInputStream input("int main()\n{\n     int x = 2;\n     int y;\n     int z = 10;\n     if(x)\n     {\n        x = 5+3;\n     }\n     else\n     {\n        z = 10;\n        y = -x;\n     }\n     return x;\n}");
 		//ANTLRInputStream input("int test()\n{\n    int b = 2;\n    int c = 3;\n    int d = c+d;\n    return d;\n}\n\nvoid main()\n{\n    test();\n}");
 		//ANTLRInputStream input("void test()\n{\n    char b = 'l';\n    int c = 3;\n    int d = c+d;\n    return;\n}\n\nvoid main()\n{\n    test();\n}");
 		//ANTLRInputStream input("int func3(int x, int y, int z, int a, int b, int c, int d, int e, int h, int i, int j)\n{\n    int f = d + e + h + i + j;\n    int g = e;\n    int test = 5;\n    int test2 = 5;\n    int test3 = 5;\n\n    return b;\n}\n\nint main()\n{\n        int a = 2;\n        int b = 3;\n        int c = 3;\n        //int c = a + b;\n        int d = 5;\n        int e = 5;\n\n        func3(5,5,5,5,5,5,b,c,d,e,a);\n}");
@@ -63,7 +67,7 @@ int main(int argc, char* argv[])
 		std::stringstream stream;
 		controlFlowGraph.GenerateX86(stream);
 
-		std::ofstream file("C:\\School_3rdyr\\Gradwork\\Project\\Compiler\\out.o", std::ios::out | std::ios::trunc);
+		std::ofstream file("C:\\School_3rdyr\\Gradwork\\Project\\Compiler\\out.s", std::ios::out | std::ios::trunc);
 
 		if (!file)
 		{
@@ -74,11 +78,11 @@ int main(int argc, char* argv[])
 		file << stream.rdbuf();
 
 		//std::cout << tree->toStringTree(&parser, true) << std::endl;
-	}
-	catch (...)
-	{
-		errorLogger.Signal(ERROR, "Caught exception in main " + antlrcpp::what(), 0);
-	}
+	//}
+	//catch (...)
+	//{
+	//	errorLogger.Signal(ERROR, "Caught exception in main " + antlrcpp::what(), 0);
+	//}
 
 	return 0;
 }

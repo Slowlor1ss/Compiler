@@ -36,6 +36,20 @@ void Operation::Prologue::GenerateASM(std::ostream& o)
 	}
 }
 
+bool Operation::Return::PropagateConst()
+{
+	if(!m_ReturnParam.empty())
+	{
+		const auto* sym = m_Scope->GetSymbol(m_ReturnParam);
+		if (sym && sym->constVal.has_value())
+		{
+			m_ReturnParam = std::to_string(sym->constVal.value());
+		}
+	}
+
+	return false;
+}
+
 //https://scottc130.medium.com/implementing-functions-in-x86-assembly-a2fb7315e2e0
 void Operation::Return::GenerateASM(std::ostream& o) //TODO: if the return of a function is a constptr then we can replace the whole function by a return of that value
 {
@@ -46,18 +60,12 @@ void Operation::Return::GenerateASM(std::ostream& o) //TODO: if the return of a 
 		if (m_Scope->HasSymbol(m_ReturnParam))
 		{
 			const Symbol* source = m_Scope->GetSymbol(m_ReturnParam);
-			const std::string sourceLoc = source->constPtr ? "$" + std::to_string(*source->constPtr) : source->GetOffsetReg();
-
-			o << FormatInstruction("movl", sourceLoc, "%eax");
+			o << FormatInstruction("movl", source->GetOffsetReg(), "%eax");
 		}
 		// Returning a const value
 		else
 		{
-			// Convert const to right value
-			const bool isChar = m_BasicBlock->GetFunction()->returnType == "char";
-			const int constValue = isChar ? static_cast<int>(m_ReturnParam[1]) : stoi(m_ReturnParam);
-
-			o << FormatInstruction("movl", "$" + std::to_string(constValue), "%eax");
+			o << FormatInstruction("movl", "$" + m_ReturnParam, "%eax");
 		}
 		AddCommentToPrevInstruction(o, "[Return] save return value in the result adress");
 	}
@@ -87,6 +95,15 @@ void Operation::Call::GenerateASM(std::ostream& o)
 	}
 }
 
+bool Operation::WriteParam::PropagateConst()
+{
+	if (m_Sym->constVal.has_value())
+	{
+		m_ConstVal = m_Sym->constVal;
+	}
+	return false;
+}
+
 void Operation::WriteParam::GenerateASM(std::ostream& o)
 {
 	// Use registers as long as there are available
@@ -97,8 +114,8 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 		const std::string movInstr = (m_Sym->varType == "char") ? "movb" : "movl";
 
 		std::string param;
-		if (m_Sym->constPtr)
-			param = '$' + std::to_string(*m_Sym->constPtr);
+		if (m_ConstVal)
+			param = '$' + std::to_string(*m_ConstVal);
 		else
 			param = m_Sym->GetOffsetReg();
 
@@ -111,9 +128,9 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 	{
 		//NOTE: THESE PUSH'S DON'T HAVE ANY POP'S
 		//2nd NOTE: (they don't need any as they will be overwritten by next function as the sp moves behind them (See: Instruction::Call))
-		if (m_Sym->constPtr)
+		if (m_ConstVal)
 		{
-			o << FormatInstruction("pushq", '$' + std::to_string(*m_Sym->constPtr));
+			o << FormatInstruction("pushq", '$' + std::to_string(*m_ConstVal));
 		}
 		else
 		{
@@ -162,6 +179,12 @@ void Operation::ReadParam::GenerateASM(std::ostream& o)
 }
 #pragma endregion FunctionOperations
 
+bool Operation::WriteConst::PropagateConst()
+{
+	//TODO: remove code in visitor add code here dont forget to delete temp var
+	return false;
+}
+
 void Operation::WriteConst::GenerateASM(std::ostream& o)
 {
 	const bool isChar = m_Sym->varType == "char";
@@ -173,25 +196,197 @@ void Operation::WriteConst::GenerateASM(std::ostream& o)
 #pragma region BasicOperations
 bool Operation::Assign::PropagateConst()
 {
-	// If it is a scope variable assign with a const
-	if (m_SourceSym->constPtr)
+	//note to self while making this:
+	// - only has to be done once per bb per variable
+	// - what if const propagation hasn't been done yet for the entry block like in a while loop (think about how while loops will be implemented)
+
+	// If we find it in out const table that we already checked it
+	//if (m_BasicBlock->FindConst(m_SourceSym->varName))
+	//	return;
+	//
+	//if (m_SourceSym->constVal)
+	//{
+	//	bool m_ConstMismatch = false;
+	//	for (auto* entryBlock : m_BasicBlock->GetEntryBlocks())
+	//	{
+	//		if(auto prevConst = entryBlock->FindConst(m_SourceSym->varName))
+	//		{
+	//			if (prevConst.has_value())
+	//			{
+	//				if (prevConst != m_SourceSym->constVal.value())
+	//				{
+	//					//const mismatch
+	//					m_ConstMismatch = true;
+	//					break;
+	//				}
+	//			}
+	//			// If its const here but not in the prev block the value is by default a mismatch
+	//			else
+	//			{
+	//				m_ConstMismatch = true;
+	//				break;
+	//			}
+	//		}
+	//	}
+	//	if(m_ConstMismatch)
+	//	{
+	//		// For every block that flows in to this one add an instruction that stores the right value of our previously const value so that the right value will be in memory
+	//		for (auto* entryBlock : m_BasicBlock->GetEntryBlocks())
+	//		{
+	//			if (auto prevConst = entryBlock->FindConst(m_SourceSym->varName)) //if its found
+	//			{
+	//				if (prevConst.has_value()) // and has a const value -> write that value
+	//				{
+	//					m_BasicBlock->AddInstr(new WriteConst(m_SourceSym, std::to_string(*prevConst), m_Scope)); //TODO: fix; technically scope isn't fully correct anymore but correct enough as the variable will exist in the given scope
+	//				}
+	//				//else don't do anything as it's value will already be written in that block
+	//			}
+	//			else
+	//			{
+	//				//if its not found we have to still write it at the end of that block so it is set for the future
+	//				//TODO: maybe set it in the entry block of this entry so it would eg. be above the if?
+	//				m_BasicBlock->AddInstr(new WriteConst(m_SourceSym, std::to_string(*m_SourceSym->constVal), m_Scope)); //TODO: fix; same
+	//			}
+	//		}
+	//
+	//		//no longer has a const value
+	//		m_SourceSym->constVal = std::nullopt;
+	//	}
+	//}
+	//
+	//{
+	//	bool constIsUnknown{ false };
+	//	for (auto* entryBlock : m_BasicBlock->GetEntryBlocks())
+	//	{
+	//		if (!entryBlock->GetAsmInitialized())
+	//		{
+	//			constIsUnknown = true;
+	//		}
+	//	}
+	//
+	//	bool SafeToUse(Symbol* Symbol, int newValue)
+	//	{
+	//		if (constIsUnknown && m_DestSym->constVal)
+	//		{
+	//			m_DestSym->constVal = std::nullopt;
+	//			m_BasicBlock->AddConst(m_DestSym->varName, std::nullopt);
+	//			return false;
+	//		}
+	//
+	//		//auto [hasConst, constValue] = m_BasicBlock->FindConst(m_DestSym->varName);
+	//		//if (hasConst && constValue.value() == m_DestSym->constVal.value())
+	//		//{
+	//		//	return true;
+	//		//}
+	//
+	//		if(m_DestSym->constVal != m_SourceSym->constVal)
+	//		{
+	//			
+	//		}
+	//
+	//		//check if all enties agree on the value
+	//		bool m_ConstMismatch = false;
+	//		for (auto* entryBlock : m_BasicBlock->GetEntryBlocks())
+	//		{
+	//			if (auto prevConst = entryBlock->FindConst(m_DestSym->varName))
+	//			{
+	//				if (prevConst.has_value())
+	//				{
+	//					if (prevConst != m_DestSym->constVal.value())
+	//					{
+	//						//const mismatch
+	//						m_ConstMismatch = true;
+	//						break;
+	//					}
+	//				}
+	//				// If its const here but not in the prev block the value is by default a mismatch
+	//				else
+	//				{
+	//					m_ConstMismatch = true;
+	//					break;
+	//				}
+	//			}
+	//		}
+	//		if (m_ConstMismatch)
+	//		{
+	//			// For every block that flows in to this one add an instruction that stores the right value of our previously const value so that the right value will be in memory
+	//			for (auto* entryBlock : m_BasicBlock->GetEntryBlocks())
+	//			{
+	//				auto [entrieHasConst, entryConstValue] = entryBlock->FindConst(m_DestSym->varName);
+	//				if (entrieHasConst) //if its found
+	//				{
+	//					if (entryConstValue.has_value()) // and has a const value -> write that value
+	//					{
+	//						m_BasicBlock->AddInstr(new WriteConst(m_DestSym, std::to_string(*entryConstValue), m_Scope)); //TODO: fix; technically scope isn't fully correct anymore but correct enough as the variable will exist in the given scope
+	//					}
+	//					//else don't do anything as it's value will already be written in that block
+	//				}
+	//				else
+	//				{
+	//					//if its not found we have to still write it at the end of that block so it is set for the future
+	//					//TODO: maybe set it in the entry block of this entry so it would eg. be above the if?
+	//					m_BasicBlock->AddInstr(new WriteConst(m_DestSym, std::to_string(*m_DestSym->constVal), m_Scope)); //TODO: fix; same
+	//				}
+	//			}
+	//
+	//			m_BasicBlock->AddConst(m_DestSym->varName, m_SourceSym->constVal);
+	//			//no longer has a const value
+	//			m_DestSym->constVal = std::nullopt;
+	//		}
+	//
+	//
+	//	}
+	//}
+
+	//TODO: remove
+	//const auto constValue = m_BasicBlock->FindConst(m_SourceSym->varName);
+	//if (constValue.has_value())
+	//{
+	//	m_DestSym->constVal = constValue;
+	//	m_BasicBlock->AddConst(m_DestSym, constValue);
+	//	//TODO: do an is used check and if it is used then write const
+	//	//TODO:	else remove
+	//	//if (m_DestSym->isUsed)
+	//	//{
+	//		m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*constValue), m_Scope));
+	//	//}
+	//}
+	//else 
+	if(m_SourceSym->constVal.has_value())
 	{
+		m_DestSym->constVal = m_SourceSym->constVal;
+		m_BasicBlock->AddConst(m_DestSym, m_SourceSym->constVal);
 		if constexpr (g_ConstPropagationAssignment)
-		{
-			m_DestSym->constPtr = new int(*m_SourceSym->constPtr);
-			return true;
-		}
+			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*m_DestSym->constVal), m_Scope));
 		else
-		{
-			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*m_SourceSym->constPtr), m_Scope));
-		}
+			return true;
 	}
-	// If the destination still has a constPtr but we assign a non const to it then destination should also no longer be const
-	else if(m_DestSym->constPtr)
+	else
 	{
-		delete m_DestSym->constPtr;
-		m_DestSym->constPtr = nullptr;
+		m_DestSym->constVal = std::nullopt;
+		m_BasicBlock->AddConst(m_DestSym, std::nullopt);
 	}
+
+	//TODO: clean this up and make it work
+	// If it is a scope variable assign with a const
+	//if (m_SourceSym->constVal)
+	//{
+	//	if constexpr (g_ConstPropagationAssignment)
+	//	{
+	//		//TODO: we dont delete dest constptr if it already had one
+	//		m_DestSym->constVal = m_SourceSym->constVal.value();
+	//		return true;
+	//	}
+	//	else
+	//	{
+	//		m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*m_SourceSym->constVal), m_Scope)); 
+	//	}
+	//}
+	//// If the destination still has a constPtr but we assign a non const to it then destination should also no longer be const
+	//else if(m_DestSym->constVal)
+	//{
+	//	m_DestSym->constVal = std::nullopt;
+	//}
 	return false;
 }
 
@@ -209,12 +404,29 @@ bool Operation::Declaration::PropagateConst()
 	return true;
 }
 
+//TODO: remove
+//void PropCostSym(Symbol* toSym, Symbol* FromSym, BasicBlock* bb)
+//{
+//	const auto constValue = bb->FindConst(FromSym->varName);
+//	if (constValue.has_value())
+//	{
+//		const int res = -constValue.value();
+//		toSym->constVal = res;
+//	}
+//	else if (FromSym->constVal.has_value())
+//	{
+//		const int res = -FromSym->constVal.value();
+//		toSym->constVal = res;
+//		bb->AddConst(toSym, toSym->constVal);
+//	}
+//}
+
 bool Operation::Negate::PropagateConst()
 {
-	if (m_OrigSym->constPtr)
+	if (m_OrigSym->constVal.has_value())
 	{
-		const int res = -(*m_OrigSym->constPtr);
-		m_TempSym->constPtr = new int(res);
+		const int res = -m_OrigSym->constVal.value();
+		m_TempSym->constVal = res;
 		//TODO: maybe also delete origSym (will always be temp and set in write const) If we want to delete it add a delete sym to our scope
 		return true;
 	}
@@ -246,12 +458,12 @@ void Operation::Negate::GenerateASM(std::ostream& o)
 bool Operation::Additive::CheckObsoleteExpr() const
 {
 	// Check obsolete expression? (eg. x + 0 || x - 0 || 0 + x || etc...)
-	if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+	if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0) // Could just be written as if(m_LhsSym->constVal.value() == 0) but it maybe a bit more readable if we first explicitly check if it has a value
 	{
 		*m_ResultSym = *m_RhsSym;
 		return true;
 	}
-	else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+	else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
 	{
 		*m_ResultSym = *m_LhsSym;
 		return true;
@@ -261,10 +473,10 @@ bool Operation::Additive::CheckObsoleteExpr() const
 
 bool Operation::Plus::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr + *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() + m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	else
@@ -298,10 +510,10 @@ void Operation::Plus::GenerateASM(std::ostream& o)
 
 bool Operation::Minus::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr - *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() - m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	else
@@ -336,18 +548,18 @@ void Operation::Minus::GenerateASM(std::ostream& o)
 #pragma region Multiplicative
 bool Operation::Mul::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr * *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() * m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	else
 	{
 		// Check obsolete expression? (eg. x * 1 || 1 * x || 0 * x || ...)
-		if (m_LhsSym->constPtr)
+		if (m_LhsSym->constVal)
 		{
-			const int value = *m_LhsSym->constPtr;
+			const int value = m_LhsSym->constVal.value();
 			if (value == 1)
 			{
 				*m_ResultSym = *m_RhsSym;
@@ -355,13 +567,13 @@ bool Operation::Mul::PropagateConst()
 			}
 			else if(value == 0)
 			{
-				m_ResultSym->constPtr = new int(0);
+				m_ResultSym->constVal = 0;
 				return true;
 			}
 		}
-		else if (m_RhsSym->constPtr)
+		else if (m_RhsSym->constVal)
 		{
-			const int value = *m_RhsSym->constPtr;
+			const int value = m_RhsSym->constVal.value();
 			if (value == 1)
 			{
 				*m_ResultSym = *m_LhsSym;
@@ -369,7 +581,7 @@ bool Operation::Mul::PropagateConst()
 			}
 			else if (value == 0)
 			{
-				m_ResultSym->constPtr = new int(0);
+				m_ResultSym->constVal = 0;
 				return true;
 			}
 		}
@@ -403,21 +615,21 @@ void Operation::Mul::GenerateASM(std::ostream& o)
 
 bool Operation::Div::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr / *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() / m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	else
 	{
 		// Check obsolete expression? (eg. x / 1 || 0 / x )
-		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
 		{
-			m_ResultSym->constPtr = new int(0);
+			m_ResultSym->constVal = 0;
 			return true;
 		}
-		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 1)
+		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 1)
 		{
 			*m_ResultSym = *m_LhsSym;
 			return true;
@@ -460,16 +672,16 @@ void Operation::Div::GenerateASM(std::ostream& o)
 
 bool Operation::Mod::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr % *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() % m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	else
 	{
 		// Check obsolete expression? (eg. x % 0)
-		if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+		if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_LhsSym;
 			return true;
@@ -516,22 +728,26 @@ void Operation::Mod::GenerateASM(std::ostream& o)
 
 bool Operation::PlusEqual::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr + *m_RhsSym->constPtr;
-		m_LhsSym->constPtr = new int(res);
-		return true;
+		const int res = m_LhsSym->constVal.value() + m_RhsSym->constVal.value();
+		m_LhsSym->constVal = res;
+		m_BasicBlock->AddConst(m_LhsSym, res);
+		if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
+		else
+			return true;
 	}
 	// Check obsolete expression?
-	else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+	else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
 	{
 		return true;
 	}
 	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
-	else if (m_LhsSym->constPtr)
+	else if (m_LhsSym->constVal)
 	{
-		delete m_LhsSym->constPtr;
-		m_LhsSym->constPtr = nullptr;
+		m_LhsSym->constVal = std::nullopt;
+		m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
 	}
 	return false;
 }
@@ -562,22 +778,26 @@ void Operation::PlusEqual::GenerateASM(std::ostream& o)
 
 bool Operation::MinusEqual::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr - *m_RhsSym->constPtr;
-		m_LhsSym->constPtr = new int(res);
-		return true;
+		const int res = m_LhsSym->constVal.value() - m_RhsSym->constVal.value();
+		m_LhsSym->constVal = res;
+		m_BasicBlock->AddConst(m_LhsSym, res);
+		if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
+		else
+			return true;
 	}
 	// Check obsolete expression?
-	else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+	else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
 	{
 		return true;
 	}
 	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
-	else if (m_LhsSym->constPtr)
+	else if (m_LhsSym->constVal)
 	{
-		delete m_LhsSym->constPtr;
-		m_LhsSym->constPtr = nullptr;
+		m_LhsSym->constVal = std::nullopt;
+		m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
 	}
 	return false;
 }
@@ -609,35 +829,43 @@ void Operation::MinusEqual::GenerateASM(std::ostream& o)
 #pragma region MultiplicativeEqual
 bool Operation::MulEqual::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal.has_value() && m_RhsSym->constVal.has_value())
 	{
-		const int res = *m_LhsSym->constPtr * *m_RhsSym->constPtr;
-		m_LhsSym->constPtr = new int(res);
-		return true;
+		const int res = m_LhsSym->constVal.value() * m_RhsSym->constVal.value();
+		m_LhsSym->constVal = res;
+		m_BasicBlock->AddConst(m_LhsSym, res);
+		if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
+		else
+			return true;
 	}
 	else
 	{
 		// Check obsolete expression?
-		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
 		{
 			return true;
 		}
-		else if (m_RhsSym->constPtr)
+		else if (m_RhsSym->constVal)
 		{
-			const int value = *m_RhsSym->constPtr;
+			const int value = m_RhsSym->constVal.value();
 			if (value == 1)
 				return true;
 			else if (value == 0)
 			{
-				m_LhsSym->constPtr = new int(0); //TODO: check if this is ok and make sure the lhs doesnt stay a const when its edited later
-				return true;
+				m_LhsSym->constVal = 0;
+				m_BasicBlock->AddConst(m_LhsSym, 0);
+				if constexpr (g_ConstPropagationAssignment)
+					m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, "0", m_Scope));
+				else
+					return true;
 			}
 		}
 		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
-		else if (m_LhsSym->constPtr)
+		else if (m_LhsSym->constVal)
 		{
-			delete m_LhsSym->constPtr;
-			m_LhsSym->constPtr = nullptr;
+			m_LhsSym->constVal = std::nullopt;
+			m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
 		}
 	}
 
@@ -670,24 +898,28 @@ void Operation::MulEqual::GenerateASM(std::ostream& o)
 
 bool Operation::DivEqual::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr / *m_RhsSym->constPtr;
-		m_LhsSym->constPtr = new int(res);
-		return true;
+		const int res = m_LhsSym->constVal.value() / m_RhsSym->constVal.value();
+		m_LhsSym->constVal = res;
+		m_BasicBlock->AddConst(m_LhsSym, res);
+		if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
+		else
+			return true;
 	}
 	else
 	{
 		// Check obsolete expression?
-		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
 			return true;
-		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 1)
+		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 1)
 			return true;
 		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
-		else if (m_LhsSym->constPtr)
+		else if (m_LhsSym->constVal)
 		{
-			delete m_LhsSym->constPtr;
-			m_LhsSym->constPtr = nullptr;
+			m_LhsSym->constVal = std::nullopt;
+			m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
 		}
 	}
 
@@ -730,16 +962,16 @@ void Operation::DivEqual::GenerateASM(std::ostream& o)
 #pragma region BitwiseOperations
 bool Operation::BitwiseAnd::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr & *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() & m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	// Check obsolete expression?
-	else if ((m_LhsSym->constPtr && *m_LhsSym->constPtr == 0) || (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0))
+	else if ((m_LhsSym->constVal && m_LhsSym->constVal.value() == 0) || (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0))
 	{
-		m_ResultSym->constPtr = new int(0);
+		m_ResultSym->constVal = 0;
 		return true;
 	}
 	return false;
@@ -771,21 +1003,21 @@ void Operation::BitwiseAnd::GenerateASM(std::ostream& o)
 
 bool Operation::BitwiseOr::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr | *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() | m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	// Check obsolete expression?
 	else
 	{
-		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_RhsSym;
 			return true;
 		}
-		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_LhsSym;
 			return true;
@@ -819,21 +1051,21 @@ void Operation::BitwiseOr::GenerateASM(std::ostream& o)
 
 bool Operation::BitwiseXor::PropagateConst()
 {
-	if (m_LhsSym->constPtr && m_RhsSym->constPtr)
+	if (m_LhsSym->constVal && m_RhsSym->constVal)
 	{
-		const int res = *m_LhsSym->constPtr ^ *m_RhsSym->constPtr;
-		m_ResultSym->constPtr = new int(res);
+		const int res = m_LhsSym->constVal.value() ^ m_RhsSym->constVal.value();
+		m_ResultSym->constVal = res;
 		return true;
 	}
 	// Check obsolete expression?
 	else
 	{
-		if (m_LhsSym->constPtr && *m_LhsSym->constPtr == 0)
+		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_RhsSym;
 			return true;
 		}
-		else if (m_RhsSym->constPtr && *m_RhsSym->constPtr == 0)
+		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_LhsSym;
 			return true;
@@ -937,7 +1169,51 @@ void Operation::Not::GenerateASM(std::ostream& o)
 {
 	throw NotImplementedException();
 }
+
 #pragma endregion cmpOperations
+
+bool Operation::ConditionalJump::PropagateConst()
+{
+	if (m_ConditionSym->constVal.has_value())
+	{
+		if constexpr (g_RemoveConstConditionals)
+		{
+			if (m_ConditionSym->constVal.value() == 0)
+			{
+				m_BasicBlock->GetCFG()->RemoveBasicBlock(m_ExitTrueLabel);
+				m_BasicBlock->ReplaceInstruction(this, new UnconditionalJump(m_ExitFalseLabel, m_Scope));
+			}
+			else
+			{
+				m_BasicBlock->GetCFG()->RemoveBasicBlock(m_ExitFalseLabel);
+				m_BasicBlock->ReplaceInstruction(this, new UnconditionalJump(m_ExitTrueLabel, m_Scope));
+			}
+		}
+		/*else 
+		{
+			m_BasicBlock->AddInstr(new )
+		}*/
+	}
+	return false;
+}
+
+void Operation::ConditionalJump::GenerateASM(std::ostream& o)
+{
+	o << FormatInstruction("cmpl", "$0", m_ConditionSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[ConditionalJump] check if condition is true or false");
+	o << FormatInstruction("je", m_ExitFalseLabel);									AddCommentToPrevInstruction(o, "[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)");
+	o << FormatInstruction("jmp", m_ExitTrueLabel);									AddCommentToPrevInstruction(o, "[ConditionalJump] jump inside body");
+}
+
+bool Operation::UnconditionalJump::PropagateConst()
+{
+	return false;
+}
+
+void Operation::UnconditionalJump::GenerateASM(std::ostream& o)
+{
+	o << FormatInstruction("jmp", m_ExitTrueLabel);		AddCommentToPrevInstruction(o, "[UnconditionalJump]");
+}
+
 
 ///---------------------------
 ///	Utils
