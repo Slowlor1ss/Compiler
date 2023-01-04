@@ -34,7 +34,8 @@ private:
 };
 
 //TODO: remove these globals and make some settings
-constexpr bool g_ConstPropagationAssignment{ true };
+constexpr bool g_ConstPropagationAssignment{ false };
 constexpr bool g_OptimizeConstPropagation{ true };
+constexpr bool g_RemoveDeadcode{ true };
 constexpr bool g_RemoveConstConditionals{ true };
-constexpr bool g_OptimizeASM{ true };
+constexpr bool g_OptimizeASM{ false };

@@ -1,13 +1,49 @@
 #pragma once
 #include <algorithm>
+#include <iostream>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
-#include "Instruction.h"
+#include "../Scope.h"
 
+
+class BasicBlock;
+
+namespace Operation
+{
+	class WriteConst;
+}
+
+struct Symbol;
+class ConstPropInfo;
 struct Function;
 class Scope;
 class ControlFlowGraph;
 class Instruction;
+
+class ConstPropInfo
+{
+public:
+	ConstPropInfo() = default; //set things liek in other constructor body
+	ConstPropInfo(std::optional<int> value, Symbol* origSym, Operation::WriteConst* writeConstInst, BasicBlock* bb, bool hasInstr);
+	ConstPropInfo(const ConstPropInfo& c);
+	~ConstPropInfo() { std::cout << "\nout of scope\n"; }
+	//ConstPropInfo& operator=(const ConstPropInfo& c);
+
+	//void SetValue(std::optional<int> value, Symbol* origSym, Operation::WriteConst* writeConstInst);
+
+	std::optional<int> GetValue(const std::string& name);
+
+private:
+	friend class BasicBlock;
+
+	BasicBlock* m_BB{ nullptr };
+	Symbol* m_OriginalSym{ nullptr };
+	Operation::WriteConst* m_WriteConstInst{ nullptr };
+	std::optional<int> m_Value{};
+	bool m_HasWriteInstr{ false };
+};
 
 /// <summary>
 /// Represents a node from the control-flow graph
@@ -30,11 +66,7 @@ public:
 	void GenerateX86(std::ostream& o);
 
 	//TODO: maybe optimize this or add an replace current instruction as we often just replace the curr instruction and thus have the iterator in optimizeIR
-	void ReplaceInstruction(Instruction* oldInst, Instruction* newInst)
-	{
-		std::ranges::replace(m_Instructions, oldInst, newInst);
-		delete oldInst;
-	}
+	void ReplaceInstruction(Instruction* oldInst, Instruction* newInst);
 
 	void SetExitTrue(BasicBlock* basicBlock) { m_ExitTrue = basicBlock; if(basicBlock) m_ExitTrue->SetEntryBlock(this); }
 	void SetExitFalse(BasicBlock* basicBlock) { m_ExitFalse = basicBlock; if (basicBlock) m_ExitFalse->SetEntryBlock(this); }
@@ -50,7 +82,11 @@ public:
 	//	}
 	//	return {};
 	//}
-	void AddConst(Symbol* sym, std::optional<int> value) { m_ConstTable[sym->varName] = std::pair(value, sym); }
+	std::optional<int> GetConst(const Symbol* sym);
+
+	const auto& GetConstTable() { return m_ConstTable; }
+	void AddAndUpdateConst(Symbol* sym, std::optional<int> value, Operation::WriteConst* writeConstInst);
+	void RemoveEntryBlock(BasicBlock* basicBlock);
 
 	//bool GetAsmInitialized() const { return !m_ConstUninitilaized; }
 
@@ -83,7 +119,7 @@ private:
 	// this algorithm is a modified implementation of the algorithm described here https://iitd.github.io/col728/lec/global_constant_propagation.html
 	//
 	// Basically holds a copy of the cost value in this basic block so that even if it changes later in another block here it stays the last const value it ahd in this block
-	std::unordered_map<std::string, std::pair<std::optional<int>, Symbol*>> m_ConstTable{};
+	std::unordered_map<std::string, ConstPropInfo> m_ConstTable{};
 
 	bool m_ConstUninitilaized{ true };
 
@@ -92,61 +128,5 @@ private:
 	// where n is the number of maps in the input vector and m is the average number of elements in the maps
 	//
 	// Calculates the "IN" set by intersecting all the "OUT" sets of the predecessor blocks
-	void ComputeInSet(const std::vector<BasicBlock*>& blocks)
-	{
-		// Intersect the maps
-		for (const auto& block : blocks)
-		{
-			// If there's an uninitialized block we don't know if variables will change in that block,
-			// so by default none will be const
-			if (block->m_ConstUninitilaized)
-			{
-				auto maxMap = blocks[0];
-				size_t maxSize = maxMap->m_ConstTable.size();
-				for (size_t i{1}; i < blocks.size(); ++i)
-				{
-					const size_t size = blocks[i]->m_ConstTable.size();
-					if(size > maxSize)
-					{
-						maxMap = blocks[i];
-						maxSize = size;
-					}
-				}
-
-				for (const auto & [key, value] : maxMap->m_ConstTable)
-				{
-					m_ConstTable[key].first = std::nullopt;
-					m_ConstTable[key].second = value.second;
-					// Also update the original symbol to be not const anymore
-					m_ConstTable[key].second->constVal = std::nullopt;
-				}
-				return;
-			}
-
-			for (const auto& [key, value] : block->m_ConstTable)
-			{
-				if (!value.first) 
-				{
-					// If the value is empty, set the intersection value to empty
-					m_ConstTable[key].first = std::nullopt;
-				}
-				else if (m_ConstTable.find(key) == m_ConstTable.end())
-				{
-					// If the key is not in the intersection map, add it
-					m_ConstTable[key] = value;
-					// Also update the original symbol
-					m_ConstTable[key].second->constVal = value.first;
-				}
-				else if (m_ConstTable[key].first && *m_ConstTable[key].first != *value.first)
-				{
-					// If the key is in the intersection map and the values are different, set the intersection value to empty
-					m_ConstTable[key].first = std::nullopt;
-					// Also update the original symbol to be not const anymore
-					m_ConstTable[key].second->constVal = std::nullopt;
-				}
-			}
-		}
-	}
-
+	void ComputeInSet(const std::vector<BasicBlock*>& blocks);
 };
-

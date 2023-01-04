@@ -164,7 +164,6 @@ std::any CodeVisitor::visitBeginBlock(antlrcpp::CricketParser::BeginBlockContext
 
 std::any CodeVisitor::visitEndBlock(antlrcpp::CricketParser::EndBlockContext* ctx)
 {
-	// Static analysis
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 	scope->CheckUnusedSymbols(m_ErrorLogger);
 
@@ -177,8 +176,8 @@ std::any CodeVisitor::visitEndBlock(antlrcpp::CricketParser::EndBlockContext* ct
 		//currBB->AddInstr(new Operation::ConditionalJump(conditionResult, currBB->GetExitTrue()->GetLabel(), currBB->GetExitFalse()->GetLabel(), scope));
 	}
 #endif
-	if (currBB->GetExitTrue())
-		currBB->AddInstr(new Operation::UnconditionalJump(currBB->GetExitTrue()->GetLabel(), scope));
+	//if (currBB->GetExitTrue())
+	//	currBB->AddInstr(new Operation::UnconditionalJump(currBB->GetExitTrue()->GetLabel(), scope));
 
 	// Remove scope from the scope stack
 	m_GlobalSymbolTable->PopScope();
@@ -334,7 +333,7 @@ std::any CodeVisitor::visitVarDeclr(antlrcpp::CricketParser::VarDeclrContext* ct
 		if (scope->CheckSymbolRedefinition(symName, ctx->getStart()->getLine(), m_ErrorLogger))
 			return EXIT_FAILURE;
 
-		const auto* sym = scope->AddSymbol(symName, symType, ctx->getStart()->getLine());
+		auto* sym = scope->AddSymbol(symName, symType, ctx->getStart()->getLine());
 		m_Cfg.CurrentBB()->AddInstr(new Operation::Declaration(sym, scope));
 	}
 	return EXIT_SUCCESS;
@@ -476,7 +475,7 @@ std::any CodeVisitor::visitCmpLessOrGreaterExpr(antlrcpp::CricketParser::CmpLess
 	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
 	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
 	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
-	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
+	Symbol* resultTemp = CreateTempSymbol(ctx, "char");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
 	CheckUnsupportedVoidType(ctx->getStart()->getLine(), {lhsSym, rhsSym});
@@ -503,7 +502,7 @@ std::any CodeVisitor::visitCmpEqualityExpr(antlrcpp::CricketParser::CmpEqualityE
 	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
 	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
 	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
-	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
+	Symbol* resultTemp = CreateTempSymbol(ctx, "char");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
 	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
@@ -530,7 +529,7 @@ std::any CodeVisitor::visitCmpEqualityLessGreaterExpr(antlrcpp::CricketParser::C
 	Symbol* lhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(0)));
 	Symbol* rhsSym = std::any_cast<Symbol*>(visit(ctx->primaryExpr(1)));
 	//TODO: if i ever add more types this part has to change but for now  only have int and char so rhsResult will always be int
-	Symbol* resultTemp = CreateTempSymbol(ctx, "int");
+	Symbol* resultTemp = CreateTempSymbol(ctx, "char");
 
 	// In case a void type was returned throw Unsupported_Expression (by default gets caught in visitBody) 
 	CheckUnsupportedVoidType(ctx->getStart()->getLine(), { lhsSym, rhsSym });
@@ -622,7 +621,7 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 
 
 	// Create instruction for the function call
-	const Symbol* resultTemp = CreateTempSymbol(ctx, func->returnType);
+	Symbol* resultTemp = CreateTempSymbol(ctx, func->returnType);
 	m_Cfg.CurrentBB()->AddInstr(new Operation::Call(resultTemp, funcName, numParams, scope));
 	func->isCalled = true;
 	m_CurrentFunction->hasFuncCall = true;
@@ -828,15 +827,15 @@ std::any CodeVisitor::visitIfStatement(antlrcpp::CricketParser::IfStatementConte
 	{
 		visit(ctx->expr(1));
 		// Write instruction to jump back to the following block
-		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+		//bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	}
 	// If statement directly followed by a flow control statement like return, break, or continue
 	else if (ctx->flowControl()) //TODO: test properly
 	{
 		visit(ctx->flowControl());
-		// Write instruction to jump back to the following block
-		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	}
+	// Write instruction to jump back to the following block
+	bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 
 	// Set the next current BB
 	m_Cfg.SetCurrentBB(endIfBB);
@@ -877,9 +876,9 @@ std::any CodeVisitor::visitWhileStatement(antlrcpp::CricketParser::WhileStatemen
 
 	BasicBlock* beforeWhileBB = m_Cfg.CurrentBB();
 
+	BasicBlock* conditionBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction); // We create a separate bb for the condition -> while(...)
 	BasicBlock* bodyBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction);
 
-	BasicBlock* conditionBB = m_Cfg.CreateNewStatementBB(m_CurrentFunction); // We create a separate bb for the condition -> while(...)
 	m_Cfg.SetCurrentBB(conditionBB);
 	Symbol* conditionResult = std::any_cast<Symbol*>(visit(ctx->expr(0)));
 
@@ -943,6 +942,13 @@ std::any CodeVisitor::visitExprReturn(antlrcpp::CricketParser::ExprReturnContext
 
 	// Set the sp back to previous value
 	scope->SetStackPointer(currStackPointer);
+
+	const std::string functionName = m_CurrentFunction->funcName;
+	if (m_CurrentFunction->returnType != rhsResult->varType)
+	{
+		const std::string message = "Return type of function \"" + functionName + "\" does not match type of returned value";
+		m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine()); //TODO: maybe make this an error
+	}
 
 	m_Cfg.CurrentBB()->AddInstr(new Operation::Return(rhsResult->varName, scope));
 

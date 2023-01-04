@@ -40,7 +40,7 @@ BasicBlock* ControlFlowGraph::CreateNewCurrBB(Function* fn)
 
 BasicBlock* ControlFlowGraph::CreateNewStatementBB(Function* fn)
 {
-	auto* bb = new BasicBlock(this, ".B" + std::to_string(m_BasicBlocks.size()), nullptr);
+	auto* bb = new BasicBlock(this, ".B" + std::to_string(m_BasicBlocks.size()), fn);
 	m_BasicBlocks.emplace_back(bb);
 	return bb;
 }
@@ -48,10 +48,10 @@ BasicBlock* ControlFlowGraph::CreateNewStatementBB(Function* fn)
 void ControlFlowGraph::RemoveBasicBlock(std::string label)
 {
 	// Find the first object in the vector with a matching name
-	auto it = std::find_if(m_BasicBlocks.begin(), m_BasicBlocks.end(), [&](const BasicBlock* obj) {
+	auto it = std::ranges::find_if(m_BasicBlocks, [&](const BasicBlock* obj) {
 		return obj->GetLabel() == label;
 		});
-
+	//TODO: we can also erase if not looping over the container
 	// Return a pointer to the object if it was found, otherwise return nullptr
 	if (it != m_BasicBlocks.end())
 	{
@@ -113,6 +113,8 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 			std::string::size_type pos = args[0].find(':');
 			if (args[0].substr(0, pos) == prevDest)
 				outputLines.pop_back(); // Remove jump
+			else
+				prevDest = "";
 		}
 
 		// If current instruction is an instruction without parameters -> continue

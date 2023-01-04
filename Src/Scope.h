@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 #include <optional>
+#include "Intermediate/BasicBlock.h"
 
 class ErrorLogger;
 class SymbolTable;
@@ -16,12 +17,20 @@ struct Symbol //TODO: chnage types to an enum as thatll probably be better than 
 	std::string varType;			// The type (int, char, void, ...)
 	size_t varLine{};				// The lineNr where the symbol was declared
 	int memoryOffset{};				// Offset to base pointer (used to find where the value is stored) 
-	std::optional<int> constVal{};  // hold the const value if any | One of the main benefits of std::optional is that it uses a small object optimization (SOO) to store the value it holds
+	std::optional<int> constVal{};  // hold the const value if any (this holds the last const value that has been used, (when wanting to know the const value in a basic block use BasicBlock.GetConst() //TODO: make this more clear))
 	bool isUsed{false};				// Sort of dirty flag checks whether the variable is used in the code
+	//const std::unordered_map<std::string, ConstPropInfo>* constInfo{ nullptr };
 
 	/// Returns a string that represents the location of the variable
 	/// @return "memOffset(%rbp)" */
 	std::string GetOffsetReg() const { return std::to_string(memoryOffset) + "(%rbp)"; }
+	//std::optional<int> GetConst() const
+	//{
+	//	if (!constInfo)
+	//		return constVal;
+	//	else
+	//		return (*constInfo)[varName].GetValue(varName);
+	//} //TODO: remove
 };
 
 struct Function

@@ -41,7 +41,7 @@ bool Operation::Return::PropagateConst()
 	if(!m_ReturnParam.empty())
 	{
 		const auto* sym = m_Scope->GetSymbol(m_ReturnParam);
-		if (sym && sym->constVal.has_value())
+		if (sym && m_BasicBlock->GetConst(sym).has_value())
 		{
 			m_ReturnParam = std::to_string(sym->constVal.value());
 		}
@@ -97,7 +97,7 @@ void Operation::Call::GenerateASM(std::ostream& o)
 
 bool Operation::WriteParam::PropagateConst()
 {
-	if (m_Sym->constVal.has_value())
+	if (m_BasicBlock->GetConst(m_Sym).has_value())
 	{
 		m_ConstVal = m_Sym->constVal;
 	}
@@ -118,7 +118,7 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 			param = '$' + std::to_string(*m_ConstVal);
 		else
 			param = m_Sym->GetOffsetReg();
-
+		char a = '%d/0';
 		//TODO: Test this for char's
 		// Move parameters in to registers
 		o << FormatInstruction(movInstr, param, reg); AddCommentToPrevInstruction(o, "[WriteParam] move param:" + m_Sym->varName + " into " + reg);
@@ -187,6 +187,12 @@ bool Operation::WriteConst::PropagateConst()
 
 void Operation::WriteConst::GenerateASM(std::ostream& o)
 {
+	if constexpr (g_RemoveDeadcode)
+	{
+		if (!m_IsUsed)
+			return;
+	}
+
 	const bool isChar = m_Sym->varType == "char";
 
 	o << FormatInstruction(isChar ? "movb" : "movl", "$" + m_ValueString, m_Sym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[WriteConst] move " + m_ValueString + " into " + m_Sym->varName);
@@ -269,7 +275,7 @@ bool Operation::Assign::PropagateConst()
 	//		if (constIsUnknown && m_DestSym->constVal)
 	//		{
 	//			m_DestSym->constVal = std::nullopt;
-	//			m_BasicBlock->AddConst(m_DestSym->varName, std::nullopt);
+	//			m_BasicBlock->AddAndUpdateConst(m_DestSym->varName, std::nullopt);
 	//			return false;
 	//		}
 	//
@@ -329,7 +335,7 @@ bool Operation::Assign::PropagateConst()
 	//				}
 	//			}
 	//
-	//			m_BasicBlock->AddConst(m_DestSym->varName, m_SourceSym->constVal);
+	//			m_BasicBlock->AddAndUpdateConst(m_DestSym->varName, m_SourceSym->constVal);
 	//			//no longer has a const value
 	//			m_DestSym->constVal = std::nullopt;
 	//		}
@@ -343,7 +349,7 @@ bool Operation::Assign::PropagateConst()
 	//if (constValue.has_value())
 	//{
 	//	m_DestSym->constVal = constValue;
-	//	m_BasicBlock->AddConst(m_DestSym, constValue);
+	//	m_BasicBlock->AddAndUpdateConst(m_DestSym, constValue);
 	//	//TODO: do an is used check and if it is used then write const
 	//	//TODO:	else remove
 	//	//if (m_DestSym->isUsed)
@@ -351,20 +357,25 @@ bool Operation::Assign::PropagateConst()
 	//		m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*constValue), m_Scope));
 	//	//}
 	//}
-	//else 
-	if(m_SourceSym->constVal.has_value())
+	//else
+	//TODO: cheack on this
+	//if(m_SourceSym->GetConst().has_value())
+	if(m_BasicBlock->GetConst(m_SourceSym).has_value())
 	{
-		m_DestSym->constVal = m_SourceSym->constVal;
-		m_BasicBlock->AddConst(m_DestSym, m_SourceSym->constVal);
-		if constexpr (g_ConstPropagationAssignment)
-			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_DestSym, std::to_string(*m_DestSym->constVal), m_Scope));
-		else
-			return true;
+		//if (m_DestSym->isUsed)//TODO: uncomment
+		//{
+			//m_DestSym->constVal = m_SourceSym->constVal;
+			auto* constInstr = new Operation::WriteConst(m_DestSym, std::to_string(*m_SourceSym->constVal), m_Scope);
+			m_BasicBlock->AddAndUpdateConst(m_DestSym, m_SourceSym->constVal, constInstr);
+			m_BasicBlock->ReplaceInstruction(this, constInstr);
+		//}
+		//else
+		//	return true;
 	}
 	else
 	{
-		m_DestSym->constVal = std::nullopt;
-		m_BasicBlock->AddConst(m_DestSym, std::nullopt);
+		//m_DestSym->constVal = std::nullopt;
+		m_BasicBlock->AddAndUpdateConst(m_DestSym, std::nullopt, nullptr);
 	}
 
 	//TODO: clean this up and make it work
@@ -401,6 +412,7 @@ void Operation::Assign::GenerateASM(std::ostream& o)
 
 bool Operation::Declaration::PropagateConst()
 {
+	m_BasicBlock->AddAndUpdateConst(m_Sym, std::nullopt, nullptr);
 	return true;
 }
 
@@ -417,13 +429,13 @@ bool Operation::Declaration::PropagateConst()
 //	{
 //		const int res = -FromSym->constVal.value();
 //		toSym->constVal = res;
-//		bb->AddConst(toSym, toSym->constVal);
+//		bb->AddAndUpdateConst(toSym, toSym->constVal);
 //	}
 //}
 
 bool Operation::Negate::PropagateConst()
 {
-	if (m_OrigSym->constVal.has_value())
+	if (m_BasicBlock->GetConst(m_OrigSym).has_value())
 	{
 		const int res = -m_OrigSym->constVal.value();
 		m_TempSym->constVal = res;
@@ -455,25 +467,38 @@ void Operation::Negate::GenerateASM(std::ostream& o)
 }
 
 #pragma region Additive
-bool Operation::Additive::CheckObsoleteExpr() const
+bool Operation::Additive::CheckObsoleteExpr()
 {
 	// Check obsolete expression? (eg. x + 0 || x - 0 || 0 + x || etc...)
-	if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0) // Could just be written as if(m_LhsSym->constVal.value() == 0) but it maybe a bit more readable if we first explicitly check if it has a value
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value())
 	{
-		*m_ResultSym = *m_RhsSym;
-		return true;
+		m_ConstVal = m_LhsSym->constVal;
+		m_LhsIsConst = true;
+
+		// Could just be written as if(m_LhsSym->constVal.value() == 0) but it maybe a bit more readable if we first explicitly check if it has a value
+		if(m_LhsSym->constVal.value() == 0)
+		{
+			*m_ResultSym = *m_RhsSym;
+			return true;
+		}
 	}
-	else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
+	else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
-		*m_ResultSym = *m_LhsSym;
-		return true;
+		m_ConstVal = m_RhsSym->constVal;
+		m_LhsIsConst = false;
+
+		if(m_RhsSym->constVal.value() == 0)
+		{
+			*m_ResultSym = *m_LhsSym;
+			return true;
+		}
 	}
 	return false;
 }
 
 bool Operation::Plus::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() + m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
@@ -502,15 +527,17 @@ void Operation::Plus::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Plus] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Plus] move " + m_RhsSym->varName + " into EDX");
-	o << FormatInstruction("addl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[Plus] add values together");
-	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Plus] save result into " + m_ResultSym->varName);
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");							AddCommentToPrevInstruction(o, "[Plus] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");							AddCommentToPrevInstruction(o, "[Plus] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("addl", "%edx", "%eax");					AddCommentToPrevInstruction(o, "[Plus] add values together");
+	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Plus] save result into " + m_ResultSym->varName);
 }
 
 bool Operation::Minus::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() - m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
@@ -539,16 +566,19 @@ void Operation::Minus::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Minus] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Minus] move " + m_RhsSym->varName + " into EDX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[Minus] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");			AddCommentToPrevInstruction(o, "[Minus] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[Minus] subtract values");
 	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Minus] save result into " + m_ResultSym->varName);
 }
 #pragma endregion Additive
 #pragma region Multiplicative
+//TODO: todolist change m_LhsSym->constVal to bb->getconst and add m_costval in case only one param is const
 bool Operation::Mul::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() * m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
@@ -557,29 +587,31 @@ bool Operation::Mul::PropagateConst()
 	else
 	{
 		// Check obsolete expression? (eg. x * 1 || 1 * x || 0 * x || ...)
-		if (m_LhsSym->constVal)
+		if (m_BasicBlock->GetConst(m_LhsSym).has_value())
 		{
-			const int value = m_LhsSym->constVal.value();
-			if (value == 1)
+			m_ConstVal = m_LhsSym->constVal;
+			m_LhsIsConst = true;
+			if (m_ConstVal == 1)
 			{
 				*m_ResultSym = *m_RhsSym;
 				return true;
 			}
-			else if(value == 0)
+			else if(m_ConstVal == 0)
 			{
 				m_ResultSym->constVal = 0;
 				return true;
 			}
 		}
-		else if (m_RhsSym->constVal)
+		else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
 		{
-			const int value = m_RhsSym->constVal.value();
-			if (value == 1)
+			m_ConstVal = m_RhsSym->constVal;
+			m_LhsIsConst = false;
+			if (m_ConstVal == 1)
 			{
 				*m_ResultSym = *m_LhsSym;
 				return true;
 			}
-			else if (value == 0)
+			else if (m_ConstVal == 0)
 			{
 				m_ResultSym->constVal = 0;
 				return true;
@@ -607,15 +639,17 @@ void Operation::Mul::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Mul] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[Mul] move " + m_RhsSym->varName + " into EDX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");									AddCommentToPrevInstruction(o, "[Mul] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[Mul] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("imull", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[Mul] multiply values");
 	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[Mul] save result into " + m_ResultSym->varName);
 }
 
 bool Operation::Div::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() / m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
@@ -624,15 +658,26 @@ bool Operation::Div::PropagateConst()
 	else
 	{
 		// Check obsolete expression? (eg. x / 1 || 0 / x )
-		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
+		if (m_BasicBlock->GetConst(m_LhsSym).has_value())
 		{
-			m_ResultSym->constVal = 0;
-			return true;
+			m_ConstVal = m_LhsSym->constVal;
+			m_LhsIsConst = true;
+			if (m_ConstVal == 0)
+			{
+				m_ResultSym->constVal = 0;
+				return true;
+			}
 		}
-		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 1)
+		else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
 		{
-			*m_ResultSym = *m_LhsSym;
-			return true;
+			m_ConstVal = m_RhsSym->constVal;
+			m_LhsIsConst = false;
+
+			if (m_RhsSym->constVal.value() == 1)
+			{
+				*m_ResultSym = *m_LhsSym;
+				return true;
+			}
 		}
 	}
 
@@ -643,20 +688,23 @@ void Operation::Div::GenerateASM(std::ostream& o)
 {
 	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Div] move " + m_LhsSym->varName + " into EAX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+
+	o << FormatInstruction(movInstr1, lhs, "%eax");									AddCommentToPrevInstruction(o, "[Div] move " + m_LhsSym->varName + " into EAX");
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
 	if (m_RhsSym->varType == "char")
 	{
-		o << FormatInstruction("movsbl", m_RhsSym->GetOffsetReg(), "%ecx");	AddCommentToPrevInstruction(o, "[Div] move " + m_RhsSym->varName + " into ECX");
+		o << FormatInstruction("movsbl", rhs, "%ecx");						AddCommentToPrevInstruction(o, "[Div] move " + m_RhsSym->varName + " into ECX");
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
 	}
 	else
 	{
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", m_RhsSym->GetOffsetReg());					AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
+		o << FormatInstruction("idivl", rhs);										AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
 	}
 
 
@@ -672,7 +720,7 @@ void Operation::Div::GenerateASM(std::ostream& o)
 
 bool Operation::Mod::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() % m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
@@ -681,10 +729,21 @@ bool Operation::Mod::PropagateConst()
 	else
 	{
 		// Check obsolete expression? (eg. x % 0)
-		if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
+		if (m_BasicBlock->GetConst(m_RhsSym).has_value())
 		{
-			*m_ResultSym = *m_LhsSym;
-			return true;
+			m_ConstVal = m_RhsSym->constVal;
+			m_LhsIsConst = false;
+
+			if (m_RhsSym->constVal.value() == 0)
+			{
+				*m_ResultSym = *m_LhsSym;
+				return true;
+			}
+		}
+		else if (m_BasicBlock->GetConst(m_LhsSym).has_value())
+		{
+			m_ConstVal = m_LhsSym->constVal;
+			m_LhsIsConst = true;
 		}
 	}
 
@@ -695,20 +754,23 @@ void Operation::Mod::GenerateASM(std::ostream& o)
 {
 	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Mod] move " + m_LhsSym->varName + " into EAX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+
+	o << FormatInstruction(movInstr1, lhs, "%eax");				AddCommentToPrevInstruction(o, "[Mod] move " + m_LhsSym->varName + " into EAX");
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
 	if (m_RhsSym->varType == "char")
 	{
-		o << FormatInstruction("movsbl", m_RhsSym->GetOffsetReg(), "%ecx");	AddCommentToPrevInstruction(o, "[Mod] move " + m_RhsSym->varName + " into ECX");
-		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
+		o << FormatInstruction("movsbl", rhs, "%ecx");	AddCommentToPrevInstruction(o, "[Mod] move " + m_RhsSym->varName + " into ECX");
+		o << FormatInstruction("cltd");								AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", "%ecx");					AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
 	}
 	else
 	{
-		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", m_RhsSym->GetOffsetReg());					AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
+		o << FormatInstruction("cltd");								AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
+		o << FormatInstruction("idivl", rhs);					AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
 	}
 
 
@@ -728,26 +790,30 @@ void Operation::Mod::GenerateASM(std::ostream& o)
 
 bool Operation::PlusEqual::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() + m_RhsSym->constVal.value();
-		m_LhsSym->constVal = res;
-		m_BasicBlock->AddConst(m_LhsSym, res);
-		if constexpr (g_ConstPropagationAssignment)
-			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
-		else
-			return true;
+		//m_LhsSym->constVal = res;
+		auto* constInstr = new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope);
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, res, constInstr);
+		//if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, constInstr);
+		//else
+		//	return true;
 	}
 	// Check obsolete expression?
-	else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
+	else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
-		return true;
+		m_ConstVal = m_RhsSym->constVal;
+
+		if (m_RhsSym->constVal.value() == 0)
+			return true;
 	}
 	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
 	else if (m_LhsSym->constVal)
 	{
-		m_LhsSym->constVal = std::nullopt;
-		m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
+		//m_LhsSym->constVal = std::nullopt;
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
 	}
 	return false;
 }
@@ -770,34 +836,39 @@ void Operation::PlusEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
+	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("addl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[PlusEqual] add values together");
 	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[PlusEqual] save result into " + m_LhsSym->varName);
 }
 
 bool Operation::MinusEqual::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() - m_RhsSym->constVal.value();
-		m_LhsSym->constVal = res;
-		m_BasicBlock->AddConst(m_LhsSym, res);
-		if constexpr (g_ConstPropagationAssignment)
-			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
-		else
-			return true;
+		//m_LhsSym->constVal = res;
+		auto* constInstr = new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope);
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, res, constInstr);
+		//if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, constInstr);
+		//else
+		//	return true;
 	}
 	// Check obsolete expression?
-	else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
+	else  if (m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
-		return true;
+		m_ConstVal = m_RhsSym->constVal;
+
+		if (m_RhsSym->constVal.value() == 0)
+			return true;
 	}
 	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
 	else if (m_LhsSym->constVal)
 	{
-		m_LhsSym->constVal = std::nullopt;
-		m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
+		//m_LhsSym->constVal = std::nullopt;
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
 	}
 	return false;
 }
@@ -820,8 +891,9 @@ void Operation::MinusEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
+	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MinusEqual] add values together");
 	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MinusEqual] save result into " + m_LhsSym->varName);
 }
@@ -829,15 +901,16 @@ void Operation::MinusEqual::GenerateASM(std::ostream& o)
 #pragma region MultiplicativeEqual
 bool Operation::MulEqual::PropagateConst()
 {
-	if (m_LhsSym->constVal.has_value() && m_RhsSym->constVal.has_value())
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() * m_RhsSym->constVal.value();
-		m_LhsSym->constVal = res;
-		m_BasicBlock->AddConst(m_LhsSym, res);
-		if constexpr (g_ConstPropagationAssignment)
-			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
-		else
-			return true;
+		//m_LhsSym->constVal = res;
+		auto* constInstr = new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope);
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, res, constInstr);
+		//if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, constInstr);
+		//else
+		//	return true;
 	}
 	else
 	{
@@ -848,24 +921,25 @@ bool Operation::MulEqual::PropagateConst()
 		}
 		else if (m_RhsSym->constVal)
 		{
-			const int value = m_RhsSym->constVal.value();
-			if (value == 1)
+			m_ConstVal = m_RhsSym->constVal.value();
+			if (m_ConstVal == 1)
 				return true;
-			else if (value == 0)
+			else if (m_ConstVal == 0)
 			{
-				m_LhsSym->constVal = 0;
-				m_BasicBlock->AddConst(m_LhsSym, 0);
-				if constexpr (g_ConstPropagationAssignment)
-					m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, "0", m_Scope));
-				else
-					return true;
+				//m_LhsSym->constVal = 0;
+				auto* constInstr = new Operation::WriteConst(m_LhsSym, "0", m_Scope);
+				m_BasicBlock->AddAndUpdateConst(m_LhsSym, 0, constInstr);
+				//if constexpr (g_ConstPropagationAssignment)
+					m_BasicBlock->ReplaceInstruction(this, constInstr);
+				//else
+				//	return true;
 			}
 		}
 		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
 		else if (m_LhsSym->constVal)
 		{
-			m_LhsSym->constVal = std::nullopt;
-			m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
+			//m_LhsSym->constVal = std::nullopt;
+			m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
 		}
 	}
 
@@ -890,36 +964,41 @@ void Operation::MulEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
+	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MulEqual] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[MulEqual] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[MulEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("imull", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MulEqual] add values together");
 	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MulEqual] save result into " + m_LhsSym->varName);
 }
 
 bool Operation::DivEqual::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() / m_RhsSym->constVal.value();
-		m_LhsSym->constVal = res;
-		m_BasicBlock->AddConst(m_LhsSym, res);
-		if constexpr (g_ConstPropagationAssignment)
-			m_BasicBlock->ReplaceInstruction(this, new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope));
-		else
-			return true;
+		//m_LhsSym->constVal = res;
+		auto* constInstr = new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope);
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, res, constInstr);
+		//if constexpr (g_ConstPropagationAssignment)
+			m_BasicBlock->ReplaceInstruction(this, constInstr);
+		//else
+		//	return true;
 	}
 	else
 	{
 		// Check obsolete expression?
 		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
 			return true;
-		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 1)
-			return true;
+		else if (m_RhsSym->constVal)
+		{
+			m_ConstVal = m_RhsSym->constVal.value();
+			if (m_ConstVal == 1)
+				return true;
+		}
 		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
 		else if (m_LhsSym->constVal)
 		{
-			m_LhsSym->constVal = std::nullopt;
-			m_BasicBlock->AddConst(m_LhsSym, std::nullopt);
+			m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
 		}
 	}
 
@@ -934,16 +1013,18 @@ void Operation::DivEqual::GenerateASM(std::ostream& o)
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
+
+	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 	if (m_RhsSym->varType == "char")
 	{
-		o << FormatInstruction("movsbl", m_RhsSym->GetOffsetReg(), "%ecx");		AddCommentToPrevInstruction(o, "[DivEqual] move " + m_RhsSym->varName + " into ECX");
+		o << FormatInstruction("movsbl", rhs, "%ecx");						AddCommentToPrevInstruction(o, "[DivEqual] move " + m_RhsSym->varName + " into ECX");
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
 	}
 	else
 	{
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
-		o << FormatInstruction("idivl", m_RhsSym->GetOffsetReg());						AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
+		o << FormatInstruction("idivl", rhs);										AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
 	}
 
 
@@ -962,17 +1043,34 @@ void Operation::DivEqual::GenerateASM(std::ostream& o)
 #pragma region BitwiseOperations
 bool Operation::BitwiseAnd::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() & m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
 		return true;
 	}
 	// Check obsolete expression?
-	else if ((m_LhsSym->constVal && m_LhsSym->constVal.value() == 0) || (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0))
+	else if (m_BasicBlock->GetConst(m_LhsSym).has_value())
 	{
-		m_ResultSym->constVal = 0;
-		return true;
+		m_ConstVal = m_LhsSym->constVal;
+		m_LhsIsConst = true;
+
+		if (m_LhsSym->constVal.value() == 0)
+		{
+			m_ResultSym->constVal = 0;
+			return true;
+		}
+	}
+	else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
+	{
+		m_ConstVal = m_RhsSym->constVal;
+		m_LhsIsConst = false;
+
+		if (m_RhsSym->constVal.value() == 0)
+		{
+			m_ResultSym->constVal = 0;
+			return true;
+		}
 	}
 	return false;
 }
@@ -995,29 +1093,40 @@ void Operation::BitwiseAnd::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + m_RhsSym->varName + " into EDX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");			AddCommentToPrevInstruction(o, "[BitwiseAnd] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("andl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[BitwiseAnd] bitwise AND op");
 	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseAnd] save result into " + m_ResultSym->varName);
 }
 
 bool Operation::BitwiseOr::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() | m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
 		return true;
 	}
 	// Check obsolete expression?
-	else
+	else if(m_BasicBlock->GetConst(m_LhsSym).has_value())
 	{
-		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
+		m_ConstVal = m_LhsSym->constVal;
+		m_LhsIsConst = true;
+
+		if (m_LhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_RhsSym;
 			return true;
 		}
-		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
+	}
+	else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
+	{
+		m_ConstVal = m_RhsSym->constVal;
+		m_LhsIsConst = false;
+		
+		if (m_RhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_LhsSym;
 			return true;
@@ -1043,29 +1152,40 @@ void Operation::BitwiseOr::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + m_RhsSym->varName + " into EDX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");			AddCommentToPrevInstruction(o, "[BitwiseOr] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("orl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[BitwiseOr] bitwise OR op");
 	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseOr] save result into " + m_ResultSym->varName);
 }
 
 bool Operation::BitwiseXor::PropagateConst()
 {
-	if (m_LhsSym->constVal && m_RhsSym->constVal)
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
 	{
 		const int res = m_LhsSym->constVal.value() ^ m_RhsSym->constVal.value();
 		m_ResultSym->constVal = res;
 		return true;
 	}
 	// Check obsolete expression?
-	else
+	else if (m_BasicBlock->GetConst(m_LhsSym).has_value())
 	{
-		if (m_LhsSym->constVal && m_LhsSym->constVal.value() == 0)
+		m_ConstVal = m_LhsSym->constVal;
+		m_LhsIsConst = true;
+
+		if (m_LhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_RhsSym;
 			return true;
 		}
-		else if (m_RhsSym->constVal && m_RhsSym->constVal.value() == 0)
+	}
+	else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
+	{
+		m_ConstVal = m_RhsSym->constVal;
+		m_LhsIsConst = false;
+
+		if (m_RhsSym->constVal.value() == 0)
 		{
 			*m_ResultSym = *m_LhsSym;
 			return true;
@@ -1091,101 +1211,176 @@ void Operation::BitwiseXor::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, m_RhsSym->GetOffsetReg(), "%edx");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + m_RhsSym->varName + " into EDX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");			AddCommentToPrevInstruction(o, "[BitwiseXor] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("xorl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "[BitwiseXor] bitwise XOR op");
 	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[BitwiseXor] save result into " + m_ResultSym->varName);
 }
+
 #pragma endregion BitwiseOperations
 
 //TODO: implement assembly of branch related stuff when adding branch related stuff
 #pragma region cmpOperations
+void Operation::Comparison::GenerateCmpASM(std::ostream& o, std::string cmpOpInstr, const std::string& OpName)
+{
+	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
+
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");									AddCommentToPrevInstruction(o, "["+OpName+"] move " + m_LhsSym->varName + " into EAX");
+	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "["+OpName+"] move " + m_RhsSym->varName + " into EDX");
+	o << FormatInstruction("cmpl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "["+OpName+"] compaire values");
+	o << FormatInstruction(std::move(cmpOpInstr), "%al");							AddCommentToPrevInstruction(o, "["+OpName+"] set flag "+OpName);
+	if (m_ResultSym->varType == "char")
+	{
+		o << FormatInstruction("movb", "%al", m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "["+OpName+"] save result into " + m_ResultSym->varName);
+	}
+	else
+	{
+		o << FormatInstruction("movzbl", "%al", "%eax");						AddCommentToPrevInstruction(o, "["+OpName+"] save result into EAX");
+		o << FormatInstruction("movl", "%eax", m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "["+OpName+"] save EAX " + m_ResultSym->varName);
+	}
+}
+//TODO: this idea could be used in other propagate consts like addition for plus and min for example
+bool Operation::Comparison::PropagateCmpConst(const std::function<bool(bool, bool)>& operation)
+{
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value() && m_BasicBlock->GetConst(m_RhsSym).has_value())
+	{
+		const int res = operation(m_LhsSym->constVal.value(), m_ResultSym->constVal.value());
+		m_ResultSym->constVal = res;
+		return true;
+	}
+
+	if (m_BasicBlock->GetConst(m_LhsSym).has_value())
+	{
+		m_ConstVal = m_LhsSym->constVal;
+		m_LhsIsConst = true;
+	}
+	else if (m_BasicBlock->GetConst(m_RhsSym).has_value())
+	{
+		m_ConstVal = m_RhsSym->constVal;
+		m_LhsIsConst = false;
+	}
+	return false;
+}
+
 bool Operation::LessThan::PropagateConst()
 {
-	return false;
+	return PropagateCmpConst(std::less<>());
 }
 
 void Operation::LessThan::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	GenerateCmpASM(o, "setl", "LessThan");
 }
 
 bool Operation::GreaterThan::PropagateConst()
 {
-	return false;
+	return PropagateCmpConst(std::greater<>());
 }
 
 void Operation::GreaterThan::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	GenerateCmpASM(o, "setg", "GreaterThan");
 }
 
 bool Operation::Equal::PropagateConst()
 {
-	return false;
+	return PropagateCmpConst(std::equal_to<>());
 }
 
 void Operation::Equal::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	GenerateCmpASM(o, "sete", "Equal");
 }
 
 bool Operation::NotEqual::PropagateConst()
 {
-	return false;
+	return PropagateCmpConst(std::not_equal_to<>());
 }
 
 void Operation::NotEqual::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	GenerateCmpASM(o, "setne", "NotEqual");
 }
 
 bool Operation::LessOrEqual::PropagateConst()
 {
-	return false;
+	return PropagateCmpConst(std::less_equal<>());
 }
 
 void Operation::LessOrEqual::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	GenerateCmpASM(o, "setle", "LessOrEqual");
 }
 
 bool Operation::GreaterOrEqual::PropagateConst()
 {
-	return false;
+	return PropagateCmpConst(std::greater_equal<>());
 }
 
 void Operation::GreaterOrEqual::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	GenerateCmpASM(o, "setge", "GreaterOrEqual");
 }
 
 bool Operation::Not::PropagateConst()
 {
+	if (m_BasicBlock->GetConst(m_OrigSym).has_value())
+	{
+		const int res = !m_OrigSym->constVal.value();
+		m_TempSym->constVal = res;
+		//TODO: maybe also delete origSym (will always be temp and set in write const) If we want to delete it add a delete sym to our scope
+		return true;
+	}
 	return false;
 }
 
 void Operation::Not::GenerateASM(std::ostream& o)
 {
-	throw NotImplementedException();
+	const std::string movInstr1 = m_OrigSym->varType == "char" ? "movsbl" : "movl";
+
+	o << FormatInstruction(movInstr1, m_OrigSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[Not] copy original value to the accumulator");
+	o << FormatInstruction("cmpl", "$0", "%eax");								AddCommentToPrevInstruction(o, "[Not] compaire value to 0");
+	o << FormatInstruction("sete", "%al");											AddCommentToPrevInstruction(o, "[Not] set flag equal");
+	if (m_TempSym->varType == "char")
+	{
+		o << FormatInstruction("movb", "%al", m_TempSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[Not] save result into " + m_TempSym->varName);
+	}
+	else
+	{
+		o << FormatInstruction("movzbl", "%al", "%eax");						AddCommentToPrevInstruction(o, "[Not] save result into EAX");
+		o << FormatInstruction("movl", "%eax", m_TempSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Not] save EAX " + m_TempSym->varName);
+	}
 }
 
 #pragma endregion cmpOperations
 
 bool Operation::ConditionalJump::PropagateConst()
 {
-	if (m_ConditionSym->constVal.has_value())
+	if (m_BasicBlock->GetConst(m_ConditionSym).has_value())
 	{
 		if constexpr (g_RemoveConstConditionals)
 		{
 			if (m_ConditionSym->constVal.value() == 0)
 			{
-				m_BasicBlock->GetCFG()->RemoveBasicBlock(m_ExitTrueLabel);
+				if (m_BasicBlock->GetExitTrue()->GetEntryBlocks().size() < 2)
+					m_BasicBlock->GetCFG()->RemoveBasicBlock(m_ExitTrueLabel);
+				else
+					m_BasicBlock->GetExitTrue()->RemoveEntryBlock(m_BasicBlock);
+
 				m_BasicBlock->ReplaceInstruction(this, new UnconditionalJump(m_ExitFalseLabel, m_Scope));
 			}
 			else
 			{
-				m_BasicBlock->GetCFG()->RemoveBasicBlock(m_ExitFalseLabel);
+				if (m_BasicBlock->GetExitFalse()->GetEntryBlocks().size() < 2)
+					m_BasicBlock->GetCFG()->RemoveBasicBlock(m_ExitFalseLabel);
+				else
+					m_BasicBlock->GetExitFalse()->RemoveEntryBlock(m_BasicBlock);
+
 				m_BasicBlock->ReplaceInstruction(this, new UnconditionalJump(m_ExitTrueLabel, m_Scope));
 			}
 		}
@@ -1199,7 +1394,8 @@ bool Operation::ConditionalJump::PropagateConst()
 
 void Operation::ConditionalJump::GenerateASM(std::ostream& o)
 {
-	o << FormatInstruction("cmpl", "$0", m_ConditionSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[ConditionalJump] check if condition is true or false");
+	const std::string cmpInstr = m_ConditionSym->varType == "char" ? "cmpb" : "cmpl";
+	o << FormatInstruction(cmpInstr, "$0", m_ConditionSym->GetOffsetReg());		AddCommentToPrevInstruction(o, "[ConditionalJump] check if condition is true or false");
 	o << FormatInstruction("je", m_ExitFalseLabel);									AddCommentToPrevInstruction(o, "[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)");
 	o << FormatInstruction("jmp", m_ExitTrueLabel);									AddCommentToPrevInstruction(o, "[ConditionalJump] jump inside body");
 }

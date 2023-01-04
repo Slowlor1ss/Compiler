@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -10,7 +11,6 @@
 
 struct Symbol;
 class BasicBlock;
-class Scope;
 class SymbolTable;
 
 class Instruction
@@ -208,10 +208,12 @@ namespace Operation
 
 		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
+		void SetUsed(bool used) { m_IsUsed = used; }
 
 	private:
 		const Symbol* m_Sym;
 		std::string m_ValueString;
+		bool m_IsUsed{false};
 	};
 
 	class Assign : public Instruction
@@ -243,7 +245,7 @@ namespace Operation
 		Declaration(const std::string& symName, Scope* scope)
 			: Declaration(scope->GetSymbol(symName), scope)
 		{}
-		Declaration(const Symbol* sym, Scope* scope)
+		Declaration(Symbol* sym, Scope* scope)
 			: Instruction(scope, OperationType::Declaration)
 			, m_Sym(sym)
 		{}
@@ -253,7 +255,7 @@ namespace Operation
 		void GenerateASM(std::ostream& o) override {}
 
 	private:
-		const Symbol* m_Sym;
+		Symbol* m_Sym;
 	};
 
 	class Negate : public Instruction
@@ -294,11 +296,16 @@ namespace Operation
 			, m_RhsSym(rhsSym)
 		{}
 
-		bool CheckObsoleteExpr() const;
+		bool CheckObsoleteExpr();
 
 		Symbol* m_ResultSym;
 		const Symbol* m_LhsSym;
 		const Symbol* m_RhsSym;
+		// If there's only one const value we cant do constant folding but we can prevent a loading of that variable
+		// by just writng the const
+		std::optional<int> m_ConstVal{};
+		bool m_LhsIsConst = false;
+
 	};
 
 	class Plus : public Additive
@@ -351,6 +358,9 @@ namespace Operation
 		Symbol* m_ResultSym;
 		const Symbol* m_LhsSym;
 		const Symbol* m_RhsSym;
+
+		std::optional<int> m_ConstVal{};
+		bool m_LhsIsConst = false;
 	};
 
 	class Mul : public Multiplicative
@@ -415,6 +425,8 @@ namespace Operation
 
 		Symbol* m_LhsSym;
 		const Symbol* m_RhsSym;
+
+		std::optional<int> m_ConstVal{};
 	};
 
 	class PlusEqual : public AdditiveEqual
@@ -465,6 +477,8 @@ namespace Operation
 
 		Symbol* m_LhsSym;
 		const Symbol* m_RhsSym;
+
+		std::optional<int> m_ConstVal{};
 	};
 
 	class MulEqual : public MultiplicativeEqual
@@ -517,6 +531,9 @@ namespace Operation
 		Symbol* m_ResultSym;
 		const Symbol* m_LhsSym;
 		const Symbol* m_RhsSym;
+
+		std::optional<int> m_ConstVal{};
+		bool m_LhsIsConst = false;
 	};
 
 	class BitwiseAnd : public Bitwise
@@ -580,9 +597,15 @@ namespace Operation
 			, m_RhsSym(rhsSym)
 		{}
 
+		void GenerateCmpASM(std::ostream& o, std::string cmpOpInstr, const std::string& OpName);
+		bool PropagateCmpConst(const std::function<bool(bool, bool)>& operation);
+
 		Symbol* m_ResultSym;
 		const Symbol* m_LhsSym;
 		const Symbol* m_RhsSym;
+
+		std::optional<int> m_ConstVal{};
+		bool m_LhsIsConst = false;
 	};
 
 	class LessThan : public Comparison
@@ -675,7 +698,7 @@ namespace Operation
 		Not(const std::string& tempSymName, const std::string& origSymName, Scope* scope)
 			: Not(scope->GetSymbol(tempSymName), scope->GetSymbol(origSymName), scope)
 		{}
-		Not(const Symbol* tempSym, const Symbol* origSym, Scope* scope)
+		Not(Symbol* tempSym, const Symbol* origSym, Scope* scope)
 			: Instruction(scope, OperationType::ExclamationMark)
 			, m_TempSym(tempSym)
 			, m_OrigSym(origSym)
@@ -685,7 +708,7 @@ namespace Operation
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const Symbol* m_TempSym;
+		Symbol* m_TempSym;
 		const Symbol* m_OrigSym;
 	};
 #pragma endregion Comparison
