@@ -17,7 +17,8 @@ test_if_ii:
 		movl	$4, %edx		#[GreaterThan] move [Temp_7] into EDX
 		cmpl	%edx, %eax		#[GreaterThan] compaire values
 		setg	%al		#[GreaterThan] set flag GreaterThan
-		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
+		movb	%al, -17(%rbp)		#[GreaterThan] save result into [Temp_8]
+		cmpb	$0, -17(%rbp)		#[ConditionalJump] check if condition is true or false
 		je	.B3		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 .B2:
 		movl	$1, -12(%rbp)		#[WriteConst] move 1 into a
@@ -29,16 +30,17 @@ test_if_ii:
 		movl	$10, %edx		#[LessThan] move [Temp_11] into EDX
 		cmpl	%edx, %eax		#[LessThan] compaire values
 		setl	%al		#[LessThan] set flag LessThan
-		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
+		movb	%al, -26(%rbp)		#[LessThan] save result into [Temp_12]
+		cmpb	$0, -26(%rbp)		#[ConditionalJump] check if condition is true or false
 		je	.B6		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 .B5:
-		movl	$1, -16(%rbp)		#[WriteConst] move 1 into b
+		movl	$1, -21(%rbp)		#[WriteConst] move 1 into b
 		jmp	.B7		#[UnconditionalJump]
 .B6:
-		movl	$0, -16(%rbp)		#[WriteConst] move 0 into b
+		movl	$0, -21(%rbp)		#[WriteConst] move 0 into b
 .B7:
 		movl	-12(%rbp), %eax		#[Plus] move a into EAX
-		movl	-16(%rbp), %edx		#[Plus] move b into EDX
+		movl	-21(%rbp), %edx		#[Plus] move b into EDX
 		addl	%edx, %eax		#[Plus] add values together
 		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
 		popq	%rbp		#[Return] Retrieve base pointer
@@ -53,7 +55,8 @@ test_while:
 		movl	$5, %edx		#[LessThan] move [Temp_17] into EDX
 		cmpl	%edx, %eax		#[LessThan] compaire values
 		setl	%al		#[LessThan] set flag LessThan
-		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
+		movb	%al, -9(%rbp)		#[LessThan] save result into [Temp_18]
+		cmpb	$0, -9(%rbp)		#[ConditionalJump] check if condition is true or false
 		je	.B11		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 .B10:
 		movl	-4(%rbp), %eax		#[Plus] move i into EAX
@@ -62,35 +65,36 @@ test_while:
 		movl	%eax, -4(%rbp)		#[Assign] move accumulator in i
 		jmp	.B9		#[UnconditionalJump]
 .B11:
-		movl	$0, -8(%rbp)		#[WriteConst] move 0 into j
+		movl	$0, -13(%rbp)		#[WriteConst] move 0 into j
 .B12:
-		movl	-8(%rbp), %eax		#[LessThan] move j into EAX
+		movl	-13(%rbp), %eax		#[LessThan] move j into EAX
 		movl	$10, %edx		#[LessThan] move [Temp_22] into EDX
 		cmpl	%edx, %eax		#[LessThan] compaire values
 		setl	%al		#[LessThan] set flag LessThan
-		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
+		movb	%al, -18(%rbp)		#[LessThan] save result into [Temp_23]
+		cmpb	$0, -18(%rbp)		#[ConditionalJump] check if condition is true or false
 		je	.B14		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 .B13:
-		movl	-8(%rbp), %eax		#[Plus] move j into EAX
+		movl	-13(%rbp), %eax		#[Plus] move j into EAX
 		movl	$1, %edx		#[Plus] move [Temp_24] into EDX
 		addl	%edx, %eax		#[Plus] add values together
-		movl	%eax, -8(%rbp)		#[Assign] move accumulator in j
 		movl	$5, %edx		#[Equal] move [Temp_26] into EDX
 		cmpl	%edx, %eax		#[Equal] compaire values
 		sete	%al		#[Equal] set flag Equal
-		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
+		movb	%al, -23(%rbp)		#[Equal] save result into [Temp_27]
+		cmpb	$0, -23(%rbp)		#[ConditionalJump] check if condition is true or false
 		je	.B16		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 		jmp	.B15		#[ConditionalJump] jump inside body
 .B14:
 		movl	-4(%rbp), %eax		#[Plus] move i into EAX
-		movl	-8(%rbp), %edx		#[Plus] move j into EDX
+		movl	-13(%rbp), %edx		#[Plus] move j into EDX
 		addl	%edx, %eax		#[Plus] add values together
 		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
 		popq	%rbp		#[Return] Retrieve base pointer
 		ret		#[Return]
 .B15:
 		movl	-4(%rbp), %eax		#[Plus] move i into EAX
-		movl	-8(%rbp), %edx		#[Plus] move j into EDX
+		movl	-13(%rbp), %edx		#[Plus] move j into EDX
 		addl	%edx, %eax		#[Plus] add values together
 		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
 		popq	%rbp		#[Return] Retrieve base pointer
@@ -101,7 +105,7 @@ test_while:
 test_function_calls:
 		pushq	%rbp		#[Prologue] Save the old base pointer
 		movq	%rsp, %rbp		#[Prologue] Set the base pointer to the current stack pointer
-		subq	$16, %rsp		#[Prologue] Make room on the stack for local variables
+		subq	$48, %rsp		#[Prologue] Make room on the stack for local variables
 		call	test_arithmetic		#[Call]
 		movl	%eax, -4(%rbp)		#[Assign] move accumulator in k
 		movl	$6, %esi		#[WriteParam] move param:[Temp_32] into %esi
@@ -124,7 +128,12 @@ main:
 		movq	%rsp, %rbp		#[Prologue] Set the base pointer to the current stack pointer
 		subq	$16, %rsp		#[Prologue] Make room on the stack for local variables
 		call	test_function_calls		#[Call]
-		movl	%eax, -4(%rbp)		#[Assign] move accumulator in result
+		
+		movl    %eax, %esi
+        leaq    format(%rip), %rdi
+        movb    $0, %al
+        call   printf
+		
 		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
 		popq	%rbp		#[Return] Retrieve base pointer
 		ret		#[Return]

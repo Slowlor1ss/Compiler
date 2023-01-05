@@ -61,6 +61,7 @@ public:
 	Function* GetFunc(const std::string& name);
 
 	Symbol* AddSymbol(const std::string& name, const std::string& varType, size_t varLine, std::optional<int> constVal = {});
+	Symbol* AddTempSymbol(const std::string& name, const std::string& varType, size_t varLine, std::optional<int> constVal = {});
 	Function* AddFunc(const std::string& name, std::string retType, size_t nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, size_t funcLine);
 
 	const Scope* GetEnclosingScope() const;

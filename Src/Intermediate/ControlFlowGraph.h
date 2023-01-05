@@ -25,6 +25,7 @@ public:
 private:
 	void OptimizeASM(std::stringstream& ss);
 	std::vector<std::string> Split(const std::string& s, const std::string& sep);
+	[[nodiscard]] std::string ReplaceString(const std::string& s, const std::string& from, const std::string& to);
 
 	std::vector<BasicBlock*> m_BasicBlocks;
 	//Option to enable CFG optimizations
@@ -38,4 +39,5 @@ constexpr bool g_ConstPropagationAssignment{ false };
 constexpr bool g_OptimizeConstPropagation{ true };
 constexpr bool g_RemoveDeadcode{ true };
 constexpr bool g_RemoveConstConditionals{ true };
-constexpr bool g_OptimizeASM{ false };
+constexpr bool g_OptimizeASM{ true };
+constexpr bool g_RemoveTempVars{ true && g_OptimizeASM };

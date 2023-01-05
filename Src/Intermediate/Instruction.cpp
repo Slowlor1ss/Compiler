@@ -21,7 +21,9 @@ void Operation::Prologue::GenerateASM(std::ostream& o)
 	// .globl my_function, declares my_function as a global symbol, meaning it can be called from other files.
 	o << ".globl " << label << '\n';
 	// '.type' directive is used to specify the type of a symbol '@function' Indicates that the symbol is a function.
-	o << ".type " << label << ", @function" << '\n';
+	//Little confused about the .type but it gives errors when trying to compile on windows and commenting it fixes it
+	//Possible explanation https://sourceware.org/binutils/docs/as/Type.html#Type
+	//o << ".type " << label << ", @function" << '\n';
 	// 'my_function:' labels the start of the function.
 	o << label << ":" << '\n';
 
@@ -89,7 +91,7 @@ void Operation::Call::GenerateASM(std::ostream& o)
 
 	//NOTE: only needed when function actually returns something
 	//save function return value
-	if (m_BasicBlock->GetFunction()->returnType != "void") //TODO: maybe unessesery as it might be optimized away anyway
+	if (m_BasicBlock->GetFunction()->returnType != "void")
 	{
 		o << FormatInstruction("movl", "%eax", m_Param->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Call] Save Func Return value into " + m_Param->varName);
 	}
@@ -118,7 +120,7 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 			param = '$' + std::to_string(*m_ConstVal);
 		else
 			param = m_Sym->GetOffsetReg();
-		char a = '%d/0';
+
 		//TODO: Test this for char's
 		// Move parameters in to registers
 		o << FormatInstruction(movInstr, param, reg); AddCommentToPrevInstruction(o, "[WriteParam] move param:" + m_Sym->varName + " into " + reg);
@@ -160,22 +162,6 @@ void Operation::ReadParam::GenerateASM(std::ostream& o)
 
 		o << FormatInstruction(movInstr, reg, m_Sym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into param:" + m_Sym->varName);
 	}
-	//TODO: cleanup
-	// If we ran out of registers don't do anything values are already in the right location
-	//else //TODO: maybe only do these when they are actually used in code
-	//{ //TODO: this code will def have to change maybe the symbol its offset needs to be changed to new offset below or some optimazation magic
-		//TODO: but only one can be moved in EAX and this should only be done when it being used
-		//int offset = std::stoi(m_Params.at(2));
-
-
-
-		//const bool isChar = localParamSym->varType == "char";
-		//const std::string reg = isChar ? "%al" : "%eax";
-		//const std::string movInstr = isChar ? "movb" : "movl";
-		//
-		//o << FormatInstruction(movInstr, std::to_string(offset) + "(%rbp)", reg); AddCommentToPrevInstruction(o, "[ReadParam] move param value into " + reg);
-		//o << FormatInstruction(movInstr, reg, localParamSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into " + localParamSym->varName);
-	//}
 }
 #pragma endregion FunctionOperations
 
@@ -375,7 +361,7 @@ bool Operation::Assign::PropagateConst()
 	else
 	{
 		//m_DestSym->constVal = std::nullopt;
-		m_BasicBlock->AddAndUpdateConst(m_DestSym, std::nullopt, nullptr);
+		m_BasicBlock->AddAndUpdateConst(m_DestSym, std::nullopt, {});
 	}
 
 	//TODO: clean this up and make it work
@@ -412,7 +398,7 @@ void Operation::Assign::GenerateASM(std::ostream& o)
 
 bool Operation::Declaration::PropagateConst()
 {
-	m_BasicBlock->AddAndUpdateConst(m_Sym, std::nullopt, nullptr);
+	m_BasicBlock->AddAndUpdateConst(m_Sym, std::nullopt, {});
 	return true;
 }
 
@@ -813,7 +799,7 @@ bool Operation::PlusEqual::PropagateConst()
 	else if (m_LhsSym->constVal)
 	{
 		//m_LhsSym->constVal = std::nullopt;
-		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, {});
 	}
 	return false;
 }
@@ -868,7 +854,7 @@ bool Operation::MinusEqual::PropagateConst()
 	else if (m_LhsSym->constVal)
 	{
 		//m_LhsSym->constVal = std::nullopt;
-		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
+		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, {});
 	}
 	return false;
 }
@@ -939,7 +925,7 @@ bool Operation::MulEqual::PropagateConst()
 		else if (m_LhsSym->constVal)
 		{
 			//m_LhsSym->constVal = std::nullopt;
-			m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
+			m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, {});
 		}
 	}
 
@@ -998,7 +984,7 @@ bool Operation::DivEqual::PropagateConst()
 		// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
 		else if (m_LhsSym->constVal)
 		{
-			m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, nullptr);
+			m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, {});
 		}
 	}
 
@@ -1230,6 +1216,8 @@ void Operation::Comparison::GenerateCmpASM(std::ostream& o, std::string cmpOpIns
 
 	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
 	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	//TODO: can improve dont have to load EAX and ADX always
+	//TODO: probably best to write a function that takes 2 symbols and does this
 	o << FormatInstruction(movInstr1, lhs, "%eax");									AddCommentToPrevInstruction(o, "["+OpName+"] move " + m_LhsSym->varName + " into EAX");
 	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "["+OpName+"] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("cmpl", "%edx", "%eax");							AddCommentToPrevInstruction(o, "["+OpName+"] compaire values");

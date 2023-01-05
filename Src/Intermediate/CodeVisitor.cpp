@@ -68,7 +68,11 @@ void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const
 Symbol* CodeVisitor::CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, std::optional<int> constVal)
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
-	Symbol* sym  = scope->AddSymbol("[Temp_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constVal);
+	Symbol* sym;
+	if constexpr (g_RemoveTempVars)
+		sym = scope->AddTempSymbol("[Temp_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constVal);
+	else
+		sym = scope->AddSymbol("[Temp_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constVal);
 	sym->isUsed = true;
 
 	return sym;
@@ -176,8 +180,8 @@ std::any CodeVisitor::visitEndBlock(antlrcpp::CricketParser::EndBlockContext* ct
 		//currBB->AddInstr(new Operation::ConditionalJump(conditionResult, currBB->GetExitTrue()->GetLabel(), currBB->GetExitFalse()->GetLabel(), scope));
 	}
 #endif
-	//if (currBB->GetExitTrue())
-	//	currBB->AddInstr(new Operation::UnconditionalJump(currBB->GetExitTrue()->GetLabel(), scope));
+	if (currBB->GetExitTrue())
+		currBB->AddInstr(new Operation::UnconditionalJump(currBB->GetExitTrue()->GetLabel(), scope));
 
 	// Remove scope from the scope stack
 	m_GlobalSymbolTable->PopScope();
@@ -821,21 +825,23 @@ std::any CodeVisitor::visitIfStatement(antlrcpp::CricketParser::IfStatementConte
 		visit(ctx->beginBlock());
 		visit(ctx->body());
 		visit(ctx->endBlock());
+		// Already happens in endBlock
+		//bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	}
 	// If statement without {}
 	else if (ctx->expr(1))
 	{
 		visit(ctx->expr(1));
 		// Write instruction to jump back to the following block
-		//bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	}
 	// If statement directly followed by a flow control statement like return, break, or continue
 	else if (ctx->flowControl()) //TODO: test properly
 	{
 		visit(ctx->flowControl());
+		// Write instruction to jump back to the following block
+		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	}
-	// Write instruction to jump back to the following block
-	bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 
 	// Set the next current BB
 	m_Cfg.SetCurrentBB(endIfBB);
@@ -901,17 +907,23 @@ std::any CodeVisitor::visitWhileStatement(antlrcpp::CricketParser::WhileStatemen
 		visit(ctx->beginBlock());
 		visit(ctx->body());
 		visit(ctx->endBlock());
+		// Already happens in endBlock
+		//bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	}
 	else if (ctx->expr(1))
+	{
 		visit(ctx->expr(1));
+		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+	}
 	else if (ctx->flowControl())
+	{
 		visit(ctx->flowControl());
-
+		bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
+	}
 	beforeWhileBB->AddInstr(new Operation::UnconditionalJump(beforeWhileBB->GetExitTrue()->GetLabel(), scope));
-	//TODO: maybe unnecessary jump
-	bodyBB->AddInstr(new Operation::UnconditionalJump(bodyBB->GetExitTrue()->GetLabel(), scope));
 	conditionBB->AddInstr(new Operation::ConditionalJump(conditionResult, conditionBB->GetExitTrue()->GetLabel(), conditionBB->GetExitFalse()->GetLabel(), scope));
 	// NOTE: actually depends on in what order the basic blacks have been added as these are instructions added to different basic blocks
+	// NOTO: code below is not correct anymore maybe TODO: remove
 	// Example of how it will look in assembly
 	//		(...)
 	//		jmp.L2					#jump to the comparision

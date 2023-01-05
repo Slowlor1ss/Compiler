@@ -26,12 +26,8 @@ class ConstPropInfo
 {
 public:
 	ConstPropInfo() = default; //set things liek in other constructor body
-	ConstPropInfo(std::optional<int> value, Symbol* origSym, Operation::WriteConst* writeConstInst, BasicBlock* bb, bool hasInstr);
+	ConstPropInfo(std::optional<int> value, Symbol* origSym, std::vector<Operation::WriteConst*> writeConstInst, BasicBlock* bb);
 	ConstPropInfo(const ConstPropInfo& c);
-	~ConstPropInfo() { std::cout << "\nout of scope\n"; }
-	//ConstPropInfo& operator=(const ConstPropInfo& c);
-
-	//void SetValue(std::optional<int> value, Symbol* origSym, Operation::WriteConst* writeConstInst);
 
 	std::optional<int> GetValue(const std::string& name);
 
@@ -40,9 +36,8 @@ private:
 
 	BasicBlock* m_BB{ nullptr };
 	Symbol* m_OriginalSym{ nullptr };
-	Operation::WriteConst* m_WriteConstInst{ nullptr };
+	std::vector<Operation::WriteConst*> m_WriteConstInst{ nullptr };
 	std::optional<int> m_Value{};
-	bool m_HasWriteInstr{ false };
 };
 
 /// <summary>

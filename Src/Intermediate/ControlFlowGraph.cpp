@@ -125,21 +125,51 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 		}
 
 		std::string currInstr = args[0];
-		if (currInstr == "movl" || currInstr == "movb") 
+
+		std::vector<std::string> params = Split(args[1], ", ");
+		if (params.size() > 1)
 		{
-			// Get the individual arguments
-			std::vector<std::string> params = Split(args[1], ", ");
-			// If if the same instruction but with reversed operands than we can remove it as its useless
-			if (currInstr == prevInstr && params[0] == prevDest && params[1] == prevSrc) 
+			// Remove temp vars
+			if constexpr  (g_RemoveTempVars)
 			{
-				outputLines.pop_back(); //TODO: test
+			if (prevDest == "0(%rbp)")
+			{
+				outputLines.pop_back();
+
+				line = ReplaceString(line, "0(%rbp)", prevSrc);
+
+				args = Split(line, "\t");
+				params = Split(args[1], ", ");
+
+				prevSrc = params[0];
+				prevDest = params[1];
+
+				if (params[0]==params[1])
+					continue;
+
+				prevInstr = currInstr;
+				outputLines.push_back(line);
 				continue;
+			}
+			}
+
+			if (currInstr == "movl" || currInstr == "movb") 
+			{
+				// Get the individual arguments
+				std::vector<std::string> params = Split(args[1], ", ");
+				// If if the same instruction but with reversed operands than we can remove it as its useless
+				if (currInstr == prevInstr && params[0] == prevDest && params[1] == prevSrc) 
+				{
+					//outputLines.pop_back(); //TODO: test
+					continue;
+				}
 			}
 
 			prevSrc = params[0];
 			prevDest = params[1];
 		}
-		else if(currInstr == "jmp")
+
+		if(currInstr == "jmp")
 		{
 			// Get the jump location
 			std::string jumpDest = Split(args[1], ", ")[0];
@@ -179,4 +209,23 @@ std::vector<std::string> ControlFlowGraph::Split(const std::string& s, const std
 	parts.push_back(ss);
 
 	return parts;
+}
+
+std::string ControlFlowGraph::ReplaceString(const std::string& s, const std::string& from, const std::string& to)
+{
+	std::string res;
+
+	std::string ss = s;
+	std::string::size_type p = ss.find(from);
+	while (p != std::string::npos) {
+		if (p > 0)
+			res.append(ss.substr(0, p)).append(to);
+		else
+			res.append(to);
+		ss = ss.substr(p + from.size());
+		p = ss.find(from);
+	}
+	res.append(ss);
+
+	return res;
 }

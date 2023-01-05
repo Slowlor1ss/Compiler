@@ -79,6 +79,12 @@ Symbol* Scope::AddSymbol(const std::string& name, const std::string& varType, si
     return &(m_SymbolMap[name] = sym);
 }
 
+Symbol* Scope::AddTempSymbol(const std::string& name, const std::string& varType, size_t varLine, std::optional<int> constVal)
+{
+    const Symbol sym{ name, varType, varLine, 0, constVal, false };
+    return &(m_SymbolMap[name] = sym);
+}
+
 Function* Scope::AddFunc(const Function& fn)
 {
     return &(m_FuncMap[fn.funcName] = fn);
@@ -158,9 +164,10 @@ int Scope::GetScopeSize()
     int size = 0;
 
     // Calculate size of symbol table
-    for (const auto& v : m_SymbolMap)
+    for (const auto& s : m_SymbolMap)
     {
-        size += m_TypeSizes[v.second.varType];
+	    if (s.second.memoryOffset != 0)
+			size += m_TypeSizes[s.second.varType];
     }
 
     // Add size of child tables
@@ -168,6 +175,6 @@ int Scope::GetScopeSize()
     {
         size += sT->GetScopeSize();
     }
-    //TODO: check if we can optimize this somehow as the zise is often too big
+    //TODO: check if we can optimize this somehow, as the size is often too big
     return size;
 }
