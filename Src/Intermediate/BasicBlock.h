@@ -5,7 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "../Scope.h"
+//#include "../Scope.h"
 
 
 class BasicBlock;
@@ -50,14 +50,14 @@ public:
 	BasicBlock(ControlFlowGraph* cfg, std::string label, Function* fn);
 	~BasicBlock();
 
-	//void AddInstr(Instruction::Operation op, std::string dest, std::vector<std::string> params, Scope* sT);
 	void AddInstr(Instruction* instr);
 
 	ControlFlowGraph* GetCFG() const { return m_CFG; }
 	std::string GetLabel() const { return m_Label; }
 	Function* GetFunction() const { return m_Function; }
-	//std::vector<Instruction*> GetInstrList() const { return m_Instructions; }
+
 	void OptimizeIR();
+	void DCE();
 	void GenerateX86(std::ostream& o);
 
 	//TODO: maybe optimize this or add an replace current instruction as we often just replace the curr instruction and thus have the iterator in optimizeIR
@@ -70,20 +70,11 @@ public:
 	BasicBlock* GetExitTrue() const { return m_ExitTrue; }
 	BasicBlock* GetExitFalse() const { return m_ExitFalse; }
 
-	//std::optional<int> FindConst(const std::string& symName)
-	//{
-	//	if (const auto it = m_ConstTable.find(symName); it != m_ConstTable.end()) {
-	//		return it->second.first;
-	//	}
-	//	return {};
-	//}
 	std::optional<int> GetConst(const Symbol* sym);
 
 	const auto& GetConstTable() { return m_ConstTable; }
 	void AddAndUpdateConst(Symbol* sym, std::optional<int> value, Operation::WriteConst* writeConstInst);
 	void RemoveEntryBlock(BasicBlock* basicBlock);
-
-	//bool GetAsmInitialized() const { return !m_ConstUninitilaized; }
 
 private:
 	void SetEntryBlock(BasicBlock* basicBlock) { m_Entries.emplace_back(basicBlock); }
@@ -108,17 +99,16 @@ private:
 	//   x=3;		/|					bb3
 	// return x;	-| bb3
 	//
-	// we can know at compile time that y = 10; as we are sure of the value of x up until the if statement (and even inside the if statement were sure untill the assignment)
-	// so to keep the const value of x as long as possible we sort of compare the value of x in this block to the prev one
-	// for a more complete explanation
-	// this algorithm is a modified implementation of the algorithm described here https://iitd.github.io/col728/lec/global_constant_propagation.html
+	// we can know at compile time that y = 10; as we are sure of the value of x up until the if statement (and even inside the if statement were sure until the assignment)
+	// so to keep the const value of x as long as possible we compare the value of x in this block to the prev one if its the same we can keep it, else its unknown
+	// for a more complete explanation:
+	// my algorithm is a modified implementation of the algorithm described here https://iitd.github.io/col728/lec/global_constant_propagation.html
 	//
 	// Basically holds a copy of the cost value in this basic block so that even if it changes later in another block here it stays the last const value it ahd in this block
 	std::unordered_map<std::string, ConstPropInfo> m_ConstTable{};
 
 	bool m_ConstUninitilaized{ true };
 
-	// TODO: maybe try and find a faster algorithm (But fist TEST)
 	// Big O notation should be something like O(n*m),
 	// where n is the number of maps in the input vector and m is the average number of elements in the maps
 	//
