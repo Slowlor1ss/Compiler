@@ -93,7 +93,7 @@ Function* Scope::AddFunc(const Function& fn)
 Function* Scope::AddFunc(const std::string& name, std::string retType, size_t nbParams, std::vector<std::string> paramTypes, std::vector<std::string> paramNames, size_t funcLine)
 {
 	const Function fn{
-            name, std::move(retType), nbParams, std::move(paramTypes), std::move(paramNames), funcLine, false
+            name, std::move(retType), nullptr, nbParams, std::move(paramTypes), std::move(paramNames), funcLine
 	};
 
     return &(m_FuncMap[name] = fn);
@@ -124,7 +124,9 @@ void Scope::SetStackPointer(int sP)
     m_StackPointer = sP;
 }
 
-void Scope::CheckUnusedSymbols(ErrorLogger& errorLogger)
+// Checks if this symbol has been used in the obvious sense (meaning: if its defined and then never used) if not then send a warning
+// Then we also reset this is used boolean to be later used in deadcode elimination where only the critical symbols get maked as used
+void Scope::CheckUnusedSymbolsAndResetIsUsed(ErrorLogger& errorLogger)
 {
     for (auto& [symbolName, symbol] : m_SymbolMap)
     {
@@ -133,6 +135,8 @@ void Scope::CheckUnusedSymbols(ErrorLogger& errorLogger)
 	        std::string message = "Unused parameter \"" + symbolName + "\" at line " + std::to_string(symbol.varLine);
             errorLogger.Signal(WARNING, message, symbol.varLine);
         }
+
+
     }
 }
 

@@ -38,7 +38,7 @@ std::any CodeVisitor::visitProg(antlrcpp::CricketParser::ProgContext* ctx)
 }
 
 
-void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const
+void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx)
 {
 	// Set flag
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
@@ -56,11 +56,12 @@ void CodeVisitor::AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const
 	// Add return instruction
 	if(functionName == "main" || m_CurrentFunction->returnType != "void")
 	{
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Return({ "0" }, scope));
+		auto* tempSym = CreateTempSymbol(ctx, m_CurrentFunction->returnType, 0);
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Return(tempSym, scope));
 	}
 	else
 	{
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Return({}, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Return(nullptr, scope));
 	}
 }
 
@@ -169,7 +170,7 @@ std::any CodeVisitor::visitBeginBlock(antlrcpp::CricketParser::BeginBlockContext
 std::any CodeVisitor::visitEndBlock(antlrcpp::CricketParser::EndBlockContext* ctx)
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
-	scope->CheckUnusedSymbols(m_ErrorLogger);
+	scope->CheckUnusedSymbolsAndResetIsUsed(m_ErrorLogger);
 
 	BasicBlock* currBB = m_Cfg.CurrentBB();
 
@@ -207,6 +208,7 @@ std::any CodeVisitor::visitFuncDeclr(antlrcpp::CricketParser::FuncDeclrContext* 
 
 	// Returns the scope that was newly created in visitBeginBlock()
 	Scope* newSymbolTable = std::any_cast<Scope*>(visit(ctx->beginBlock()));
+	headerFunc->scope = newSymbolTable;
 	// Scope* newSymbolTable = m_GlobalSymbolTable->CurrentScope();
 
 	int paramStackOffset = 16;	// The size of the return address RAX(64-bit) or EAX(32-bit) stored on the stack when calling the function (in our case RAX)
@@ -620,12 +622,13 @@ std::any CodeVisitor::visitFuncExpr(antlrcpp::CricketParser::FuncExprContext* ct
 	// Add instructions for all the parameters
 	for (size_t i = numParams - 1; i != size_t(-1); i--) 
 	{
-		m_Cfg.CurrentBB()->AddInstr(new Operation::WriteParam(params[i], i, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::WriteParam(params[i], i, func, scope));
 	}
 
 
 	// Create instruction for the function call
-	Symbol* resultTemp = CreateTempSymbol(ctx, func->returnType);
+	// TODO: test returning nullprt might cause bad_any_cast
+	Symbol* resultTemp = func->returnType != "void" ? CreateTempSymbol(ctx, func->returnType) : nullptr;
 	m_Cfg.CurrentBB()->AddInstr(new Operation::Call(resultTemp, funcName, numParams, scope));
 	func->isCalled = true;
 	m_CurrentFunction->hasFuncCall = true;
@@ -962,7 +965,7 @@ std::any CodeVisitor::visitExprReturn(antlrcpp::CricketParser::ExprReturnContext
 		m_ErrorLogger.Signal(WARNING, message, ctx->getStart()->getLine()); //TODO: maybe make this an error
 	}
 
-	m_Cfg.CurrentBB()->AddInstr(new Operation::Return(rhsResult->varName, scope));
+	m_Cfg.CurrentBB()->AddInstr(new Operation::Return(rhsResult, scope));
 
 	return EXIT_SUCCESS;
 }
@@ -982,11 +985,12 @@ std::any CodeVisitor::visitEmptyReturn(antlrcpp::CricketParser::EmptyReturnConte
 	// Add return instruction
 	if (functionName == "main" || m_CurrentFunction->returnType != "void")
 	{
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Return("0", scope));
+		auto* tempSym = CreateTempSymbol(ctx, m_CurrentFunction->returnType, 0);
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Return(tempSym, scope));
 	}
 	else
 	{
-		m_Cfg.CurrentBB()->AddInstr(new Operation::Return({}, scope));
+		m_Cfg.CurrentBB()->AddInstr(new Operation::Return(nullptr, scope));
 	}
 
 	return EXIT_SUCCESS;

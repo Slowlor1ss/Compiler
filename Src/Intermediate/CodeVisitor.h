@@ -53,7 +53,7 @@ public:
 private:
 	std::any visitFuncDeclrHeader(antlrcpp::CricketParser::FuncDeclrContext* ctx);
 
-	void AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx) const;
+	void AddReturnDefaultInstr(antlr4::ParserRuleContext* ctx);
 	//creates a temp symbol and adds it to the sym list of the current scope
 	Symbol* CreateTempSymbol(const antlr4::ParserRuleContext* ctx, const std::string& varType, std::optional<int> constPtr = {});
 	std::string GetFuncUniqueName(std::string funcName, const std::vector<std::string>& paramTypes);

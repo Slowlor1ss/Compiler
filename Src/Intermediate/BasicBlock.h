@@ -57,7 +57,7 @@ public:
 	Function* GetFunction() const { return m_Function; }
 
 	void OptimizeIR();
-	void DCE();
+	void DCE(bool allowSetUnused);
 	void GenerateX86(std::ostream& o);
 
 	//TODO: maybe optimize this or add an replace current instruction as we often just replace the curr instruction and thus have the iterator in optimizeIR
@@ -78,6 +78,8 @@ public:
 
 private:
 	void SetEntryBlock(BasicBlock* basicBlock) { m_Entries.emplace_back(basicBlock); }
+
+	bool m_Used{false};
 
 	ControlFlowGraph* m_CFG;
 	std::string m_Label;

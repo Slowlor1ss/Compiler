@@ -27,8 +27,11 @@ void Operation::Prologue::GenerateASM(std::ostream& o)
 	// 'my_function:' labels the start of the function.
 	o << label << ":" << '\n';
 
-	o << FormatInstruction("pushq", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Save the old base pointer");
-	o << FormatInstruction("movq", "%rsp", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Set the base pointer to the current stack pointer");
+	if (!m_BasicBlock->GetFunction()->isConst)
+	{
+		o << FormatInstruction("pushq", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Save the old base pointer");
+		o << FormatInstruction("movq", "%rsp", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Set the base pointer to the current stack pointer");
+	}
 
 	// Keep the size a multiple of 16 for mem alignment reasons
 	const int size = RoundUpToMultipleOf16(m_Scope->GetScopeSize());
@@ -40,44 +43,71 @@ void Operation::Prologue::GenerateASM(std::ostream& o)
 
 bool Operation::Return::PropagateConst()
 {
-	if(!m_ReturnParam.empty())
+	// Check if its returning a symbol
+	if (m_ReturnParam != nullptr)
 	{
-		const auto* sym = m_Scope->GetSymbol(m_ReturnParam);
-		if (sym && m_BasicBlock->GetConst(sym).has_value())
+		if (m_BasicBlock->GetConst(m_ReturnParam).has_value())
 		{
-			m_ReturnParam = std::to_string(sym->constVal.value());
+			m_BasicBlock->GetFunction()->isConst = true;
+			m_ConstVal = m_ReturnParam->constVal;
 		}
 	}
 
 	return false;
 }
 
+void Operation::Return::DeadCodeElimination(bool allowSetUnused)
+{
+	// Check if its returning a symbol
+	if (!m_ConstVal.has_value())
+	{
+		m_ReturnParam->isUsed = true;
+	}
+	m_IsUsed = true;
+}
+
 //https://scottc130.medium.com/implementing-functions-in-x86-assembly-a2fb7315e2e0
 void Operation::Return::GenerateASM(std::ostream& o) //TODO: if the return of a function is a constptr then we can replace the whole function by a return of that value
 {
-	//check if we're actually returning anything
-	if (!m_ReturnParam.empty())
+	if (m_ReturnParam != nullptr)
 	{
-		// Returning a variable
-		if (m_Scope->HasSymbol(m_ReturnParam))
+		if (m_ConstVal.has_value())
 		{
-			const Symbol* source = m_Scope->GetSymbol(m_ReturnParam);
-			o << FormatInstruction("movl", source->GetOffsetReg(), "%eax");
+			// Returning a const
+			o << FormatInstruction("movl", "$" + std::to_string(m_ConstVal.value()), "%eax");
+			AddCommentToPrevInstruction(o, "[Return] save return value in the result adress");
 		}
-		// Returning a const value
 		else
 		{
-			o << FormatInstruction("movl", "$" + m_ReturnParam, "%eax");
+			// Returning a variable
+			o << FormatInstruction("movl", m_ReturnParam->GetOffsetReg(), "%eax");
+			AddCommentToPrevInstruction(o, "[Return] save " + m_ReturnParam->varName + " in the result adress");
 		}
-		AddCommentToPrevInstruction(o, "[Return] save return value in the result adress");
+
 	}
 
-	// Move stack pointer back to where it was before the function
-	o << FormatInstruction("movq", "%rbp", "%rsp"); AddCommentToPrevInstruction(o, "[Return] Move stack pointer back to where it was before the function");
-	//https://stackoverflow.com/questions/4584089/what-is-the-function-of-the-push-pop-instructions-used-on-registers-in-x86-ass
-	// Move base pointer back to where it was before the function
-	o << FormatInstruction("popq", "%rbp"); AddCommentToPrevInstruction(o, "[Return] Retrieve base pointer");
+	if(!m_BasicBlock->GetFunction()->isConst)
+	{
+		// Move stack pointer back to where it was before the function
+		o << FormatInstruction("movq", "%rbp", "%rsp"); AddCommentToPrevInstruction(o, "[Return] Move stack pointer back to where it was before the function");
+		//https://stackoverflow.com/questions/4584089/what-is-the-function-of-the-push-pop-instructions-used-on-registers-in-x86-ass
+		// Move base pointer back to where it was before the function
+		o << FormatInstruction("popq", "%rbp"); AddCommentToPrevInstruction(o, "[Return] Retrieve base pointer");
+	}
+
 	o << FormatInstruction("ret"); AddCommentToPrevInstruction(o, "[Return]");
+}
+
+void Operation::Call::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_ResultSym && !m_ResultSym->isUsed)
+	{
+		m_ResultSym = nullptr;
+	}
+
+	//TODO: check when we can delete the whole function call
+	//NOTE: you cant delete a function if something like printing happens in the function
+	m_IsUsed = true;
 }
 
 void Operation::Call::GenerateASM(std::ostream& o)
@@ -91,9 +121,9 @@ void Operation::Call::GenerateASM(std::ostream& o)
 
 	//NOTE: only needed when function actually returns something
 	//save function return value
-	if (m_BasicBlock->GetFunction()->returnType != "void")
+	if (m_ResultSym != nullptr)
 	{
-		o << FormatInstruction("movl", "%eax", m_Param->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Call] Save Func Return value into " + m_Param->varName);
+		o << FormatInstruction("movl", "%eax", m_ResultSym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[Call] Save Func Return value into " + m_ResultSym->varName);
 	}
 }
 
@@ -103,7 +133,21 @@ bool Operation::WriteParam::PropagateConst()
 	{
 		m_ConstVal = m_Sym->constVal;
 	}
+
 	return false;
+}
+
+void Operation::WriteParam::DeadCodeElimination(bool allowSetUnused)
+{
+	if(!m_Function->isCalled)
+		return;
+
+	
+	if (m_Function->scope->GetSymbol(m_Function->parameterNames[m_ParamIdx])->isUsed)
+	{
+		m_IsUsed = true;
+		m_Sym->isUsed = true;
+	}
 }
 
 void Operation::WriteParam::GenerateASM(std::ostream& o)
@@ -151,6 +195,14 @@ void Operation::WriteParam::GenerateASM(std::ostream& o)
 	}
 }
 
+void Operation::ReadParam::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_Sym->isUsed)
+	{
+		m_IsUsed = true;
+	}
+}
+
 void Operation::ReadParam::GenerateASM(std::ostream& o)
 {
 	// Use registers as long as there are available
@@ -162,6 +214,7 @@ void Operation::ReadParam::GenerateASM(std::ostream& o)
 
 		o << FormatInstruction(movInstr, reg, m_Sym->GetOffsetReg()); AddCommentToPrevInstruction(o, "[ReadParam] move " + reg + " into param:" + m_Sym->varName);
 	}
+	// No registers for the others so they have to be read by their offset from the base pointer
 }
 #pragma endregion FunctionOperations
 
@@ -171,13 +224,24 @@ bool Operation::WriteConst::PropagateConst()
 	return false;
 }
 
+void Operation::WriteConst::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_Sym->isUsed && m_IsConstUsed)
+	{
+		m_Sym->isUsed = !allowSetUnused;
+		//TODO: delete all write consts with the other flag first or check that flag here
+		m_IsUsed = true; //TODO: set this variable in every function and don't forget the purposefully empty once's
+
+	}
+}
+
 void Operation::WriteConst::GenerateASM(std::ostream& o)
 {
-	if constexpr (g_RemoveDeadcode)
-	{
-		if (!m_IsUsed)
-			return;
-	}
+	//if constexpr (g_RemoveDeadcode)
+	//{
+	//	if (!m_IsConstUsed)
+	//		return;
+	//}
 
 	const bool isChar = m_Sym->varType == "char";
 
@@ -189,15 +253,15 @@ bool Operation::Assign::PropagateConst()
 {
 	if(m_BasicBlock->GetConst(m_SourceSym).has_value())
 	{
-		if (m_DestSym->isUsed) //TODO: do this better there has to be a better way for unused variables
-		{
+		//if (m_DestSym->isUsed) //TODO: do this better there has to be a better way for unused variables
+		//{
 			//m_DestSym->constVal = m_SourceSym->constVal;
 			auto* constInstr = new Operation::WriteConst(m_DestSym, std::to_string(*m_SourceSym->constVal), m_Scope);
 			m_BasicBlock->AddAndUpdateConst(m_DestSym, m_SourceSym->constVal, constInstr);
 			m_BasicBlock->ReplaceInstruction(this, constInstr);
-		}
-		else
-			return true; // TODO: also delete the variable at some point
+		//}
+		//else
+		//	return true; // TODO: also delete the variable at some point
 	}
 	else
 	{
@@ -206,6 +270,18 @@ bool Operation::Assign::PropagateConst()
 	}
 
 	return false;
+}
+
+void Operation::Assign::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_DestSym->isUsed)
+	{
+		//set to false if allowed otherswise leave it true
+		m_DestSym->isUsed = !allowSetUnused;
+
+		m_SourceSym->isUsed = true;
+		m_IsUsed = true;
+	}
 }
 
 void Operation::Assign::GenerateASM(std::ostream& o)
@@ -224,7 +300,7 @@ bool Operation::Declaration::PropagateConst()
 }
 
 #pragma region Unary
-bool Operation::OneOperandInstruction::PropagateOneOperantConst(const std::function<int(int)>& operation)
+bool Operation::UnaryOperation::PropagateOneOperantConst(const std::function<int(int)>& operation)
 {
 	if (m_BasicBlock->GetConst(m_OrigSym).has_value())
 	{
@@ -234,6 +310,15 @@ bool Operation::OneOperandInstruction::PropagateOneOperantConst(const std::funct
 		return true;
 	}
 	return false;
+}
+
+void Operation::UnaryOperation::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_TempSym->isUsed)
+	{
+		m_OrigSym->isUsed = true;
+		m_IsUsed = true;
+	}
 }
 
 void Operation::Negate::GenerateASM(std::ostream& o)
@@ -277,7 +362,7 @@ void Operation::Not::GenerateASM(std::ostream& o)
 #pragma endregion Unary
 
 #pragma region TwoOperandInstructions
-bool Operation::TwoOperandInstruction::PropagateTwoOperantConst(const std::function<int(int, int)>& operation)
+bool Operation::BinaryOperation::PropagateBinaryConst(const std::function<int(int, int)>& operation)
 {
 	const bool lhsIsConst = m_BasicBlock->GetConst(m_LhsSym).has_value();
 	const bool rhsIsConst = m_BasicBlock->GetConst(m_RhsSym).has_value();
@@ -308,6 +393,16 @@ bool Operation::TwoOperandInstruction::PropagateTwoOperantConst(const std::funct
 	// Check for obsolete expressions like "x + 0" that do nothing
 	// or "x * 0" by which we know the value of x at compile time and thus can delete the instruction (by returning true)
 	return CheckObsoleteExpr(lhsIsConst, rhsIsConst);
+}
+
+void Operation::BinaryOperation::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_ResultSym->isUsed)
+	{
+		m_LhsSym->isUsed = true;
+		m_RhsSym->isUsed = true;
+		m_IsUsed = true;
+	}
 }
 
 #pragma region Additive
@@ -756,6 +851,7 @@ void Operation::GreaterOrEqual::GenerateASM(std::ostream& o)
 	GenerateCmpASM(o, "setge", "GreaterOrEqual");
 }
 
+
 #pragma endregion cmpOperations
 #pragma endregion TwoOperandInstructions
 
@@ -768,32 +864,51 @@ bool Operation::CompoundAssignment::PropagateCompoundConst(const std::function<i
 
 	if (lhsIsConst && rhsIsConst)
 	{
-		if (m_LhsSym->isUsed)
-		{
+		//if (m_LhsSym->isUsed)
+		//{
 			const int res = operation(m_LhsSym->constVal.value(), m_RhsSym->constVal.value());
 			//m_LhsSym->constVal = res;
 			auto* constInstr = new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope);
 			m_BasicBlock->AddAndUpdateConst(m_LhsSym, res, constInstr);
 			m_BasicBlock->ReplaceInstruction(this, constInstr);
-		}
-		else
-			return true;
+		//}
+		//else
+		//	return true;
+	}
+	else if (lhsIsConst)
+	{
+		m_ConstVal = m_LhsSym->constVal;
 	}
 	else if (rhsIsConst)
 	{
 		m_ConstVal = m_RhsSym->constVal;
 	}
 
+	// Ill admit this is extremely dirty but for now due to a lack of time I wont implement a proper fix
+	// The reason why I copy these pointers is because CheckObsoleteExpr might invalidate them by replacing the current instruction
+	// with another one and thus I wouldn't be able to set lhs symbol to nullopt using m_LhsSym and m_BasicBlock //TODO: fix :)
+	auto* lhsSym = m_LhsSym;
+	auto* basicBlock = m_BasicBlock;
+
 	const bool deleteInst = CheckObsoleteExpr(lhsIsConst, rhsIsConst);
 
 	// If the destination(lhs) still has a constPtr but we assign a non const to it then destination should also no longer be const
 	if (lhsIsConst && !deleteInst) // If we're going to delete this instruction lhs can stay const
 	{
-		//m_LhsSym->constVal = std::nullopt;
-		m_BasicBlock->AddAndUpdateConst(m_LhsSym, std::nullopt, {});
+		//lhsSym->constVal = std::nullopt;
+		basicBlock->AddAndUpdateConst(lhsSym, std::nullopt, {});
 	}
 
 	return deleteInst;
+}
+
+void Operation::CompoundAssignment::DeadCodeElimination(bool allowSetUnused)
+{
+	if (m_LhsSym->isUsed)
+	{
+		m_RhsSym->isUsed = true;
+		m_IsUsed = true;
+	}
 }
 
 #pragma region AdditiveEqual
@@ -801,7 +916,7 @@ bool Operation::CompoundAssignment::PropagateCompoundConst(const std::function<i
 bool Operation::PlusEqual::CheckObsoleteExpr(bool lhsIsConst, bool rhsIsConst)
 {
 	if (lhsIsConst && m_LhsSym->constVal.value() == 0)
-		m_BasicBlock->ReplaceInstruction(this, new Assign(m_LhsSym, m_RhsSym, m_Scope));
+		m_BasicBlock->ReplaceInstruction(this, new Assign(m_LhsSym, m_RhsSym, m_Scope)); // be aware this is quite dangerous :)
 	if (rhsIsConst && m_RhsSym->constVal.value() == 0)
 		return true;
 
@@ -826,8 +941,9 @@ void Operation::PlusEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_LhsSym->varName + " into EAX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_LhsSym->varName + " into EAX");
 	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[PlusEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("addl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[PlusEqual] add values together");
 	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[PlusEqual] save result into " + m_LhsSym->varName);
@@ -836,7 +952,7 @@ void Operation::PlusEqual::GenerateASM(std::ostream& o)
 bool Operation::MinusEqual::CheckObsoleteExpr(bool lhsIsConst, bool rhsIsConst)
 {
 	if (lhsIsConst && m_LhsSym->constVal.value() == 0)
-		m_BasicBlock->ReplaceInstruction(this, new Negate(m_LhsSym, m_RhsSym, m_Scope));
+		m_BasicBlock->ReplaceInstruction(this, new Negate(m_LhsSym, m_RhsSym, m_Scope)); // be aware this is quite dangerous :)
 	if (rhsIsConst && m_RhsSym->constVal.value() == 0)
 		return true;
 
@@ -861,8 +977,9 @@ void Operation::MinusEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_LhsSym->varName + " into EAX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_LhsSym->varName + " into EAX");
 	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[MinusEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("subl", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MinusEqual] add values together");
 	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MinusEqual] save result into " + m_LhsSym->varName);
@@ -911,8 +1028,9 @@ void Operation::MulEqual::GenerateASM(std::ostream& o)
 		movInstr3 = "movl";
 	}
 
-	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");			AddCommentToPrevInstruction(o, "[MulEqual] move " + m_LhsSym->varName + " into EAX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");			AddCommentToPrevInstruction(o, "[MulEqual] move " + m_LhsSym->varName + " into EAX");
 	o << FormatInstruction(movInstr2, rhs, "%edx");									AddCommentToPrevInstruction(o, "[MulEqual] move " + m_RhsSym->varName + " into EDX");
 	o << FormatInstruction("imull", "%edx", "%eax");						AddCommentToPrevInstruction(o, "[MulEqual] add values together");
 	o << FormatInstruction(movInstr3, reg3, m_LhsSym->GetOffsetReg());			AddCommentToPrevInstruction(o, "[MulEqual] save result into " + m_LhsSym->varName);
@@ -933,12 +1051,13 @@ void Operation::DivEqual::GenerateASM(std::ostream& o)
 {
 	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
-	o << FormatInstruction(movInstr1, m_LhsSym->GetOffsetReg(), "%eax");				AddCommentToPrevInstruction(o, "[DivEqual] move " + m_LhsSym->varName + " into EAX");
+	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	o << FormatInstruction(movInstr1, lhs, "%eax");				AddCommentToPrevInstruction(o, "[DivEqual] move " + m_LhsSym->varName + " into EAX");
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
 
-	const std::string rhs = m_ConstVal.has_value() ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 	if (m_RhsSym->varType == "char")
 	{
 		o << FormatInstruction("movsbl", rhs, "%ecx");						AddCommentToPrevInstruction(o, "[DivEqual] move " + m_RhsSym->varName + " into ECX");
@@ -996,6 +1115,12 @@ bool Operation::ConditionalJump::PropagateConst()
 		}*/
 	}
 	return false;
+}
+
+void Operation::ConditionalJump::DeadCodeElimination(bool allowSetUnused)
+{
+	m_IsUsed = true;
+	//TODO: maybe check if basic block is not used and then change to unconditional jump
 }
 
 void Operation::ConditionalJump::GenerateASM(std::ostream& o)

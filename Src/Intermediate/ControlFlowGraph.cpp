@@ -2,6 +2,7 @@
 #include "BasicBlock.h"
 #include "../Scope.h"
 #include <iostream>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -64,6 +65,15 @@ void ControlFlowGraph::GenerateX86(std::stringstream& ss)
 			++i;
 		}
 	}
+
+	for (const auto& m_BasicBlock : std::ranges::reverse_view(m_BasicBlocks))
+	{
+		m_BasicBlock->DCE(true);
+	}
+	//for (const auto & basicBlock : m_BasicBlocks)
+	//{
+	//	basicBlock->DCE(true);
+	//}
 
 	//std::erase(m_BasicBlocks, nullptr);
 

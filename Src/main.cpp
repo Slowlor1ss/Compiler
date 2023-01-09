@@ -57,7 +57,7 @@ int main(int argc, char* argv[])
 	ErrorLogger errorLogger{};
 	//try
 	//{
-		ControlFlowGraph controlFlowGraph{false};
+		ControlFlowGraph controlFlowGraph{true};
 		ANTLRInputStream input(inStream.str());
 		//ANTLRInputStream input("a + (x * (y ? 0 : 1) + z);");
 		//ANTLRInputStream input("b+c*d; (b+c)*d;");

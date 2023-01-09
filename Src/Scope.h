@@ -18,7 +18,7 @@ struct Symbol //TODO: chnage types to an enum as thatll probably be better than 
 	size_t varLine{};				// The lineNr where the symbol was declared
 	int memoryOffset{};				// Offset to base pointer (used to find where the value is stored) 
 	std::optional<int> constVal{};  // hold the const value if any (this holds the last const value that has been used, (when wanting to know the const value in a basic block use BasicBlock.GetConst() //TODO: make this more clear))
-	bool isUsed{false};				// Sort of dirty flag checks whether the variable is used in the code
+	bool isUsed{false};//TODO: maybe change to isCritical				// Sort of dirty flag checks whether the variable is used in the code
 	//const std::unordered_map<std::string, ConstPropInfo>* constInfo{ nullptr };
 
 	/// Returns a string that represents the location of the variable
@@ -37,11 +37,13 @@ struct Function
 {
 	std::string funcName;						// A unique name for function will be in format of function_type1type2... (allows overloading)
 	std::string returnType;
+	Scope* scope;								// The scope of the function
 	size_t nbParameters;
 	std::vector<std::string> parameterTypes;	// List of types of the parameters (in order)
 	std::vector<std::string> parameterNames; 	// List of names of every parameter (in order)
 	size_t funcLine; 							// The lineNr where the function was declared
 	bool isCalled{false};						// Sort of dirty flag checks whether the function is called used for optimization later
+	bool isConst{false};							// If no operations in this function need to load something from memory it is const (this will be set in propagate const)
 	bool hasFuncCall{ false };					// Whether or not the function contains a function call
 };
 
@@ -73,7 +75,7 @@ public:
 	void SetStackPointer(int sP);
 
 	// Static Analysis
-	void CheckUnusedSymbols(ErrorLogger& errorLogger);
+	void CheckUnusedSymbolsAndResetIsUsed(ErrorLogger& errorLogger);
 	bool CheckFunctionRedefinition(const std::string& funcName, size_t lineNumber, ErrorLogger& errorLogger) const;
 	bool CheckSymbolRedefinition(const std::string& varName, size_t lineNumber, ErrorLogger& errorLogger) const;
 	int GetScopeSize();

@@ -1,4 +1,6 @@
 #include "BasicBlock.h"
+
+#include <ranges>
 #include "ControlFlowGraph.h"
 #include "Instruction.h"
 #include "../Scope.h"
@@ -65,74 +67,23 @@ void BasicBlock::OptimizeIR()
 
 // Note to self: if ever improving or remaking a compiler consider using defChains
 // see paper "A SURVEY OF DATA FLOW ANALYSIS TECHNIQUES" by Ken Kennedy
-void BasicBlock::DCE(std::vector<Instruction*>& worklist)
+void BasicBlock::DCE(bool allowSetUnused)
 {
-	for (auto* instruction : m_Instructions)
+	if (m_Used)
+		return;
+	m_Used = true;
+
+	// Reverse foreach loop
+	for (const auto& instruction : std::ranges::reverse_view(m_Instructions))
 	{
-		//switch (instruction->GetOp())
-		//{
-		//case Instruction::OperationType::Prologue: break;
-		//case Instruction::OperationType::WriteConst: break;
-		//case Instruction::OperationType::ReadParam: break;
-		//case Instruction::OperationType::WriteParam: break;
-		//case Instruction::OperationType::Call: break;
-		//case Instruction::OperationType::Return: 
-		//	break;
-		//case Instruction::OperationType::Declaration: break;
-		//case Instruction::OperationType::Assign: 
-		//	break;
-		//case Instruction::OperationType::LessThan:
-		//case Instruction::OperationType::GreaterThan:
-		//case Instruction::OperationType::BitwiseAnd:
-		//case Instruction::OperationType::BitwiseOr:
-		//case Instruction::OperationType::BitwiseXor:
-		//case Instruction::OperationType::Equal:
-		//case Instruction::OperationType::NotEqual:
-		//case Instruction::OperationType::LessOrEqual:
-		//case Instruction::OperationType::GreaterOrEqual: 
-		//case Instruction::OperationType::Plus:
-		//case Instruction::OperationType::Minus:
-		//case Instruction::OperationType::Mul:
-		//case Instruction::OperationType::Div:
-		//case Instruction::OperationType::Mod:
-		//	auto* inst = dynamic_cast<Operation::TwoOperandInstruction*>(instruction);
-		//	if (inst->GetResult()->isUsed)
-		//	{
-		//		//remove inst from worklist
-
-		//		if (!inst->GetLhs()->isUsed)
-		//		{
-		//			inst->GetLhs()->isUsed = true;
-		//			//add to worklist
-
-		//		}
-
-		//		if (!inst->GetRhs()->isUsed)
-		//		{
-		//			inst->GetRhs()->isUsed = true;
-		//			//add to worklist
-
-		//		}
-
-
-		//	}
-		//	break;
-		//case Instruction::OperationType::PlusEqual:
-		//case Instruction::OperationType::MinusEqual:
-		//case Instruction::OperationType::MulEqual:
-		//case Instruction::OperationType::DivEqual:
-
-		//	break;
-
-		//case Instruction::OperationType::ExclamationMark:
-		//case Instruction::OperationType::Negate:
-		//	break;
-
-		//case Instruction::OperationType::ConditionalJump: break;
-		//case Instruction::OperationType::UnconditionalJump: break;
-		//default: ;
-		//}
+		instruction->DeadCodeElimination(allowSetUnused);
 	}
+
+	for (const auto basicBlock : m_Entries)
+	{
+		basicBlock->DCE(false);
+	}
+
 }
 
 void BasicBlock::GenerateX86(std::ostream& o)
@@ -142,7 +93,10 @@ void BasicBlock::GenerateX86(std::ostream& o)
 		o << m_Label << ":\n";
 	}
 	for (auto* instr : m_Instructions)
-		instr->GenerateASM(o);
+	{
+		if (instr->GetIsUsed())
+			instr->GenerateASM(o);
+	}
 }
 
 void BasicBlock::ReplaceInstruction(Instruction* oldInst, Instruction* newInst)
