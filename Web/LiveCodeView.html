@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="prism.css">
+    
+    <title>Document</title>
+</head>
+<body>
+  <style>
+    *{
+      margin: 0;
+    }
+  </style>
+  <pre style="overflow-y: scroll; margin-bottom: 6rem;">
+    <code class="language-nasm" id="codeViewId">
+    Loading code...
+    </code>
+  </pre>
+  <script src="prism.js"></script>
+  <script>
+    function readTextFile() {
+        var rawFile = new XMLHttpRequest();
+        rawFile.open("GET", "out.s", true);
+        rawFile.onreadystatechange = function() {
+          if (rawFile.readyState === 4) {
+            if (rawFile.status === 200 || rawFile.status == 0){
+              code = document.getElementById("codeViewId");
+              var dist = code.scrollTop;
+              code.innerText = rawFile.responseText;
+              code.innerHTML = code.innerHTML.replace(/[<]br[/]?[>]/gi,"\n");
+              Prism.highlightElement(code);
+              code.scrollTo(0, dist);
+              //UpdateHighlighting();
+            }
+          }
+        }
+        rawFile.send();
+      }
+      
+      readTextFile();
+      // setInterval(readTextFile, 5000);
+    </script>
+    <footer style=" bottom: 0; position: fixed; width: 100%; background-color: gray;">
+    <p style="text-align: center; padding: 0.8rem; color: whitesmoke; font-family: 'Courier New', Courier, monospace; font-size: 0.8rem;">&#169; Dreamed up by Rik, you're welcome :)</p>
+    </footer>
+</body>
+</html>
+

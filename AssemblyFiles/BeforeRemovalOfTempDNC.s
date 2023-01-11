@@ -132,7 +132,7 @@ main:
 		movl    %eax, %esi
         leaq    format(%rip), %rdi
         movb    $0, %al
-        call   printf
+        call    printf
 		
 		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
 		popq	%rbp		#[Return] Retrieve base pointer

@@ -1,11 +1,7 @@
 .text
 .globl test_arithmetic
 test_arithmetic:
-		pushq	%rbp		#[Prologue] Save the old base pointer
-		movq	%rsp, %rbp		#[Prologue] Set the base pointer to the current stack pointer
 		movl	$24, %eax		#[Return] save return value in the result adress
-		movq	%rbp, %rsp		#[Return] Move stack pointer back to where it was before the function
-		popq	%rbp		#[Return] Retrieve base pointer
 		ret		#[Return]
 .globl test_if_ii
 test_if_ii:
@@ -20,8 +16,10 @@ test_if_ii:
 		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
 		je	.B3		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 .B2:
+		movl	$1, -12(%rbp)		#[WriteConst] move 1 into a
 		jmp	.B4		#[UnconditionalJump]
 .B3:
+		movl	$0, -12(%rbp)		#[WriteConst] move 0 into a
 .B4:
 		movl	-8(%rbp), %eax		#[LessThan] move y into EAX
 		movl	$10, %edx		#[LessThan] move [Temp_11] into EDX
@@ -30,8 +28,10 @@ test_if_ii:
 		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false
 		je	.B6		#[ConditionalJump] (jump equal) jump is prev statement is false (we compare to 0)
 .B5:
+		movl	$1, -16(%rbp)		#[WriteConst] move 1 into b
 		jmp	.B7		#[UnconditionalJump]
 .B6:
+		movl	$0, -16(%rbp)		#[WriteConst] move 0 into b
 .B7:
 		movl	-12(%rbp), %eax		#[Plus] move a into EAX
 		movl	-16(%rbp), %edx		#[Plus] move b into EDX
@@ -43,6 +43,7 @@ test_if_ii:
 test_while:
 		pushq	%rbp		#[Prologue] Save the old base pointer
 		movq	%rsp, %rbp		#[Prologue] Set the base pointer to the current stack pointer
+		movl	$0, -4(%rbp)		#[WriteConst] move 0 into i
 .B9:
 		movl	-4(%rbp), %eax		#[LessThan] move i into EAX
 		movl	$5, %edx		#[LessThan] move [Temp_17] into EDX
@@ -57,6 +58,7 @@ test_while:
 		movl	%eax, -4(%rbp)		#[Assign] move accumulator in i
 		jmp	.B9		#[UnconditionalJump]
 .B11:
+		movl	$0, -8(%rbp)		#[WriteConst] move 0 into j
 .B12:
 		movl	-8(%rbp), %eax		#[LessThan] move j into EAX
 		movl	$10, %edx		#[LessThan] move [Temp_22] into EDX

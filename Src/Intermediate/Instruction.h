@@ -91,6 +91,7 @@ public:
 	bool GetIsUsed() const { return m_IsUsed; }
 	void SetBasicBlock(BasicBlock* bb) { m_BasicBlock = bb; }
 	static constexpr int GetAmountOfRegisters() { return m_AmountOfRegisters; }
+	static int RoundUpToMultipleOf16(int x);
 
 protected:
 	explicit Instruction(Scope* scope, InstructionTag op)
@@ -104,7 +105,6 @@ protected:
 	static std::string FormatInstruction(std::string instr, std::string param);
 	static std::string FormatInstruction(std::string instr);
 	static void AddCommentToPrevInstruction(std::ostream& o, const std::string& comment);
-	static int RoundUpToMultipleOf16(int x);
 
 	BasicBlock* m_BasicBlock;
 	Scope* m_Scope;

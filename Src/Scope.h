@@ -19,18 +19,15 @@ struct Symbol //TODO: chnage types to an enum as thatll probably be better than 
 	int memoryOffset{};				// Offset to base pointer (used to find where the value is stored) 
 	std::optional<int> constVal{};  // hold the const value if any (this holds the last const value that has been used, (when wanting to know the const value in a basic block use BasicBlock.GetConst() //TODO: make this more clear))
 	bool isUsed{false};//TODO: maybe change to isCritical				// Sort of dirty flag checks whether the variable is used in the code
-	//const std::unordered_map<std::string, ConstPropInfo>* constInfo{ nullptr };
 
 	/// Returns a string that represents the location of the variable
 	/// @return "memOffset(%rbp)" */
-	std::string GetOffsetReg() const { return std::to_string(memoryOffset) + "(%rbp)"; }
-	//std::optional<int> GetConst() const
-	//{
-	//	if (!constInfo)
-	//		return constVal;
-	//	else
-	//		return (*constInfo)[varName].GetValue(varName);
-	//} //TODO: remove
+	std::string GetOffsetReg() const
+	{
+		if (memoryOffset == 0) //Ignore this, its the result of some unfortunate design chooses and lack of time
+			return varName;
+		return std::to_string(memoryOffset) + "(%rbp)";
+	}
 };
 
 struct Function
@@ -43,7 +40,7 @@ struct Function
 	std::vector<std::string> parameterNames; 	// List of names of every parameter (in order)
 	size_t funcLine; 							// The lineNr where the function was declared
 	bool isCalled{false};						// Sort of dirty flag checks whether the function is called used for optimization later
-	bool isConst{false};							// If no operations in this function need to load something from memory it is const (this will be set in propagate const)
+	bool isConst{false};		//TODO: remove					// If no operations in this function need to load something from memory it is const (this will be set in propagate const)
 	bool hasFuncCall{ false };					// Whether or not the function contains a function call
 };
 

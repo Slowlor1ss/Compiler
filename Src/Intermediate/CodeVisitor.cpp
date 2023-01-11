@@ -18,6 +18,7 @@ CodeVisitor::CodeVisitor(ErrorLogger& errorHandeler, ControlFlowGraph& cfg)
 {
 	m_GlobalSymbolTable = new SymbolTable();
 	m_GlobalScope = m_GlobalSymbolTable->GetGlobalScope();
+	m_Cfg.SetSymbolTable(m_GlobalSymbolTable);
 }
 
 std::any CodeVisitor::visitProg(antlrcpp::CricketParser::ProgContext* ctx)

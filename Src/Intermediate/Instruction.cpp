@@ -27,7 +27,7 @@ void Operation::Prologue::GenerateASM(std::ostream& o)
 	// 'my_function:' labels the start of the function.
 	o << label << ":" << '\n';
 
-	if (!m_BasicBlock->GetFunction()->isConst)
+	//if (!m_BasicBlock->GetFunction()->isConst)
 	{
 		o << FormatInstruction("pushq", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Save the old base pointer");
 		o << FormatInstruction("movq", "%rsp", "%rbp"); AddCommentToPrevInstruction(o, "[Prologue] Set the base pointer to the current stack pointer");
@@ -86,7 +86,7 @@ void Operation::Return::GenerateASM(std::ostream& o) //TODO: if the return of a 
 
 	}
 
-	if(!m_BasicBlock->GetFunction()->isConst)
+	//if(!m_BasicBlock->GetFunction()->isConst)
 	{
 		// Move stack pointer back to where it was before the function
 		o << FormatInstruction("movq", "%rbp", "%rsp"); AddCommentToPrevInstruction(o, "[Return] Move stack pointer back to where it was before the function");
@@ -420,6 +420,11 @@ bool Operation::Plus::CheckObsoleteExpr(bool lhsIsConst, bool rhsIsConst)
 		return true;
 	}
 	return false;
+}
+
+std::pair<std::string, std::string> InstructionRegisterAlloc(Symbol* lhs, Symbol* rhs, bool lhsIsConst, std::optional<int> constval)
+{
+	
 }
 
 void Operation::Plus::GenerateASM(std::ostream& o)

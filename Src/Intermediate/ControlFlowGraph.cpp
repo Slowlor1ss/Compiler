@@ -8,6 +8,8 @@
 #include <vector>
 #include <iterator>
 #include <support/CPPUtils.h>
+#include "Instruction.h"
+#include "../SymbolTable.h"
 
 ControlFlowGraph::ControlFlowGraph(bool optimized)
 	: m_Optimized(optimized)
@@ -91,6 +93,12 @@ void ControlFlowGraph::GenerateX86(std::stringstream& ss)
 	}
 }
 
+void ControlFlowGraph::SetSymbolTable(SymbolTable* st)
+{
+	m_GlobalSymbolTable = st;
+}
+
+//TODO:!!! clean up put in to functions
 void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 {
 	//TODO: finish
@@ -100,6 +108,12 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 	std::string prevDest = "";
 	std::string prevSrc = "";
 
+	std::string currFunction = "";
+	std::string prevStackSize{};
+	int funcStackPrologueIdx{ -1 };
+	int spillNr{ 0 };
+	std::unordered_map<std::string, std::string> spillMap{};
+
 	//TODO: optimize conditionals and don't forget to optimize the wile like gcc does
 
 	std::string line;
@@ -108,37 +122,123 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 		// Split string in [instruction] and [param, param, ...]
 		std::vector<std::string> args = Split(line, "\t");
 
-		// Remove unnecessary jumps
-		if (args[0][0] == '.') //basic block labels always start with a .B
-		{
-			// If it corresponds to the jump previously visited
-			std::string::size_type pos = args[0].find(':');
-			if (args[0].substr(0, pos) == prevDest)
-				outputLines.pop_back(); // Remove jump
-			else
-				prevDest = "";
-		}
-
 		// If current instruction is an instruction without parameters -> continue
 		if (args.size() < 2) 
 		{
+			// Remove unnecessary jumps
+			if (args[0][0] == '.') //basic block labels always start with a .B
+			{
+				// If it corresponds to the jump previously visited
+				std::string::size_type pos = args[0].find(':');
+				if (args[0].substr(0, pos) == prevDest)
+					outputLines.pop_back(); // Remove jump
+				else
+					prevDest = "";
+			}
+			else
+			{
+				// If it has a : its a label and if it didn't start with a . its not a basic block so must be a function
+				std::string::size_type pos = args[0].find(':');
+				if (pos != std::string::npos)
+				{
+					currFunction = args[0].substr(0, pos);
+					funcStackPrologueIdx = -1;
+				}
+			}
+
 			outputLines.push_back(line);
 			continue;
 		}
 
 		std::string currInstr = args[0];
 
+		// Get the individual arguments
 		std::vector<std::string> params = Split(args[1], ", ");
 		if (params.size() > 1)
 		{
 			// Remove temp vars
 			if constexpr  (g_RemoveTempVars)
 			{
-			if (prevDest == "0(%rbp)")
+			//NOTE!: this is an extremely bad way of doing this but due to the need of a very big design change for proper register allocation
+			//		 and a lack of time I will for now leave it with a wacky implementation of conservative spilling
+			for (const auto & param : params)
 			{
+				if (param[0] == '[')
+				{
+					if (spillMap.contains(param))
+					{
+						line = ReplaceString(line, param, spillMap[param]);
+
+						if constexpr (g_AddComents)
+						{
+						//Update comment
+						std::vector<std::string> lineComment = Split(line, "#");
+						if (lineComment.size()>1)
+						{
+							line = ReplaceString(line, lineComment[1], " restore spill nr"+std::to_string(spillNr));
+						}
+						}
+					}
+				}
+			}
+
+			if (prevDest[0] == '[')
+			{
+				//NOTE!: this is an extremely bad way of doing this but due to the need of a very big design change for proper register allocation
+				//		 and a lack of time I will for now leave it with a wacky implementation of conservative spilling
+				std::string::size_type p = line.find(prevDest);
+				if (p == std::string::npos)
+				{
+					//Need to spill
+					std::string spillPos;
+					auto* func = m_GlobalSymbolTable->GetGlobalScope()->GetFunc(currFunction);
+					char opSize = *(prevInstr.end() - 1);
+					Symbol* spillSym = func->scope->AddSymbol("spill" + std::to_string(spillNr), opSize == 'l' ? "int" : "char", 0);
+					++spillNr;
+					spillMap[prevDest] = spillSym->GetOffsetReg();
+					std::string correctedPrevLine = ReplaceString(outputLines.back(), prevDest, spillSym->GetOffsetReg());
+					//Update comment
+					if constexpr (g_AddComents)
+					{
+					//Update comment
+					std::vector<std::string> lineComment = Split(correctedPrevLine, "#");
+					if (lineComment.size() > 1)
+					{
+						correctedPrevLine = ReplaceString(correctedPrevLine, lineComment[1], " spilling nr" + std::to_string(spillNr));
+					}
+					}
+					outputLines.back() = correctedPrevLine; // Update memory location
+
+					if (funcStackPrologueIdx != -1)
+					{
+						int newSize = Instruction::RoundUpToMultipleOf16(func->scope->GetScopeSize());
+						std::string newSizeStr = '$' + std::to_string(newSize);
+						if (newSizeStr != prevStackSize)
+						{
+							prevStackSize = newSizeStr;
+							std::string prologueLine = outputLines[funcStackPrologueIdx];
+							std::vector<std::string> args2 = Split(prologueLine, "\t");
+							std::vector<std::string> params2 = Split(args2[1], ", ");
+							prologueLine = ReplaceString(prologueLine, params2[0], '$' + std::to_string(newSize));
+							outputLines[funcStackPrologueIdx] = prologueLine;
+						}
+					}
+
+					// Continue as normal
+					args = Split(line, "\t");
+					params = Split(args[1], ", ");
+
+					prevSrc = params[0];
+					prevDest = params[1];
+
+					prevInstr = currInstr;
+					outputLines.push_back(line);
+					continue;
+				}
+
 				outputLines.pop_back();
 
-				line = ReplaceString(line, "0(%rbp)", prevSrc);
+				line = ReplaceString(line, prevDest, prevSrc);
 
 				args = Split(line, "\t");
 				params = Split(args[1], ", ");
@@ -157,13 +257,20 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 
 			if (currInstr == "movl" || currInstr == "movb") 
 			{
-				// Get the individual arguments
-				std::vector<std::string> params = Split(args[1], ", ");
 				// If if the same instruction but with reversed operands than we can remove it as its useless
 				if (currInstr == prevInstr && params[0] == prevDest && params[1] == prevSrc) 
 				{
 					//outputLines.pop_back(); //TODO: test
 					continue;
+				}
+			}
+
+			if (currInstr == "subq")
+			{
+				if (params[1] == "%rbp")
+				{
+					funcStackPrologueIdx = outputLines.size();
+					prevStackSize = params[0];
 				}
 			}
 

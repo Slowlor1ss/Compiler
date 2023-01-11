@@ -20,7 +20,7 @@
             "name": "Debug ANTLR4 grammar",
             "type": "antlr-debug",
             "request": "launch",
-            "input": "input.txt",
+            "input": "input.cpp",
             //"grammar": "grammars/Example.g4",
             //"grammar": "Antlr\\grammar\\C.g4",
             "grammar": "Antlr\\grammar\\Cricket.g4",

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+class SymbolTable;
 struct Function;
 class Scope;
 class BasicBlock;
@@ -22,6 +23,8 @@ public:
 	void SetCurrentBB(BasicBlock* bb) { m_CurrentBB = bb; }
 	void GenerateX86(std::stringstream& ss);
 
+	void SetSymbolTable(SymbolTable* st);
+
 private:
 	void OptimizeASM(std::stringstream& ss);
 	std::vector<std::string> Split(const std::string& s, const std::string& sep);
@@ -31,7 +34,7 @@ private:
 	//Option to enable CFG optimizations
 	bool m_Optimized;
 	BasicBlock* m_CurrentBB{};
-
+	SymbolTable* m_GlobalSymbolTable{};
 };
 
 //TODO: remove these globals and make some settings
@@ -41,3 +44,4 @@ constexpr bool g_RemoveDeadcode{ true };
 constexpr bool g_RemoveConstConditionals{ true };
 constexpr bool g_OptimizeASM{ true };
 constexpr bool g_RemoveTempVars{ true && g_OptimizeASM };
+constexpr bool g_AddComents{ true };

@@ -179,6 +179,6 @@ int Scope::GetScopeSize()
     {
         size += sT->GetScopeSize();
     }
-    //TODO: check if we can optimize this somehow, as the size is often too big
+
     return size;
 }
