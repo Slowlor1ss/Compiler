@@ -92,6 +92,10 @@ public:
 	void SetBasicBlock(BasicBlock* bb) { m_BasicBlock = bb; }
 	static constexpr int GetAmountOfRegisters() { return m_AmountOfRegisters; }
 	static int RoundUpToMultipleOf16(int x);
+	static std::string FormatInstruction(std::string instr, std::string param1, std::string param2);
+	static std::string FormatInstruction(std::string instr, std::string param);
+	static std::string FormatInstruction(std::string instr);
+	static void AddCommentToPrevInstruction(std::ostream& o, const std::string& comment);
 
 protected:
 	explicit Instruction(Scope* scope, InstructionTag op)
@@ -101,10 +105,6 @@ protected:
 	static std::pair<std::string, std::string> GetMoveInstr(const std::string& dest, const std::string& source);
 	static std::string GetMoveInstr(const std::string& source);
 
-	static std::string FormatInstruction(std::string instr, std::string param1, std::string param2);
-	static std::string FormatInstruction(std::string instr, std::string param);
-	static std::string FormatInstruction(std::string instr);
-	static void AddCommentToPrevInstruction(std::ostream& o, const std::string& comment);
 
 	BasicBlock* m_BasicBlock;
 	Scope* m_Scope;

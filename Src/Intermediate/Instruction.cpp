@@ -7,6 +7,7 @@
 #include <format>
 #include <iostream>
 #include "ControlFlowGraph.h"
+#include "OptimumTiling.h"
 
 //https://www.cs.virginia.edu/~evans/cs216/guides/x86.html
 
@@ -422,34 +423,39 @@ bool Operation::Plus::CheckObsoleteExpr(bool lhsIsConst, bool rhsIsConst)
 	return false;
 }
 
-std::pair<std::string, std::string> InstructionRegisterAlloc(Symbol* lhs, Symbol* rhs, bool lhsIsConst, std::optional<int> constval)
-{
-	
-}
+//std::pair<std::string, std::string> InstructionRegisterAlloc(Symbol* lhs, Symbol* rhs, bool lhsIsConst, std::optional<int> constval)
+//{
+//	
+//}
 
 void Operation::Plus::GenerateASM(std::ostream& o)
 {
-	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
-	const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
-	std::string movInstr3;
-	std::string reg3;
-	if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
-	{
-		reg3 = "%al";
-		movInstr3 = "movb";
-	}
-	else
-	{
-		reg3 = "%eax";
-		movInstr3 = "movl";
-	}
+	//const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
+	//const std::string movInstr2 = m_RhsSym->varType == "char" ? "movsbl" : "movl";
+	//std::string movInstr3;
+	//std::string reg3;
+	//if (m_ResultSym->varType == "char") //TODO: technically useless as where the plus operation is created tempVar is defined as always int
+	//{
+	//	reg3 = "%al";
+	//	movInstr3 = "movb";
+	//}
+	//else
+	//{
+	//	reg3 = "%eax";
+	//	movInstr3 = "movl";
+	//}
 
-	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
-	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
-	o << FormatInstruction(movInstr1, lhs, "%eax");							AddCommentToPrevInstruction(o, "[Plus] move " + m_LhsSym->varName + " into EAX");
-	o << FormatInstruction(movInstr2, rhs, "%edx");							AddCommentToPrevInstruction(o, "[Plus] move " + m_RhsSym->varName + " into EDX");
-	o << FormatInstruction("addl", "%edx", "%eax");					AddCommentToPrevInstruction(o, "[Plus] add values together");
-	o << FormatInstruction(movInstr3, reg3, m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Plus] save result into " + m_ResultSym->varName);
+	//const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
+	//const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+
+	InstrSelection::OptimumInstructionTiling i{ m_LhsSym, m_RhsSym, m_LhsIsConst, m_ConstVal, InstrSelection::plus };
+	auto [lhss, rhss] {i.LoadReg(o)};
+
+	//o << FormatInstruction(movInstr1, lhs, "%eax");							AddCommentToPrevInstruction(o, "[Plus] move " + m_LhsSym->varName + " into EAX");
+	//o << FormatInstruction(movInstr2, rhs, "%edx");							AddCommentToPrevInstruction(o, "[Plus] move " + m_RhsSym->varName + " into EDX");
+
+	o << FormatInstruction(i.GetOpsize() == 32 ? "addl":"addb", lhss, rhss);					AddCommentToPrevInstruction(o, "[Plus] add values together");
+	o << FormatInstruction("movl", rhss, m_ResultSym->GetOffsetReg());	AddCommentToPrevInstruction(o, "[Plus] save result into " + m_ResultSym->varName);
 }
 
 bool Operation::Minus::CheckObsoleteExpr(bool lhsIsConst, bool rhsIsConst)
@@ -1209,9 +1215,12 @@ std::string Instruction::FormatInstruction(std::string instr)
 
 void Instruction::AddCommentToPrevInstruction(std::ostream& o, const std::string& comment)
 {
-	//remove /n to place comment on same line
-	o.seekp(-1, std::ostream::cur);
-	o << "\t\t#" + comment + '\n'; //technically overwrite \n
+	if constexpr (g_AddComents)
+	{
+		//remove /n to place comment on same line
+		o.seekp(-1, std::ostream::cur);
+		o << "\t\t#" + comment + '\n'; //technically overwrite \n
+	}
 }
 
 int Instruction::RoundUpToMultipleOf16(const int x)

@@ -246,7 +246,10 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 				prevSrc = params[0];
 				prevDest = params[1];
 
-				if (params[0]==params[1])
+				if (	(params[0]==params[1])
+					||	(params[0] == "%eax" && params[1] == "%al")
+					||	(params[0] == "%al" && params[1] == "%eax")
+																	)
 					continue;
 
 				prevInstr = currInstr;
@@ -257,8 +260,9 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 
 			if (currInstr == "movl" || currInstr == "movb") 
 			{
-				// If if the same instruction but with reversed operands than we can remove it as its useless
-				if (currInstr == prevInstr && params[0] == prevDest && params[1] == prevSrc) 
+				// If if the same instruction but with reversed operands than we can remove it as its useless // I know this is insane
+				if ((params[0] == prevDest && (params[1] == prevSrc || params[1] == "%al" && prevSrc == "%eax" || params[1] == "%eax" && prevSrc == "%al")) &&
+					(currInstr == prevInstr || currInstr == "movl" && prevInstr == "movb" || currInstr == "movb" && prevInstr == "movl"))
 				{
 					//outputLines.pop_back(); //TODO: test
 					continue;
