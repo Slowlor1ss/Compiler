@@ -8,6 +8,7 @@
 #include "../ErrorHandeler.h"
 #include "../Scope.h"
 #include "../SymbolTable.h"
+#include "../CompilerFlags.hpp"
 
 using namespace antlrcpp;
 
@@ -71,7 +72,7 @@ Symbol* CodeVisitor::CreateTempSymbol(const antlr4::ParserRuleContext* ctx, cons
 {
 	Scope* scope = m_GlobalSymbolTable->CurrentScope();
 	Symbol* sym;
-	if constexpr (g_RemoveTempVars)
+	if (compilerFlags::g_RemoveTempVars)
 		sym = scope->AddTempSymbol("[Temp_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constVal);
 	else
 		sym = scope->AddSymbol("[Temp_" + std::to_string(m_TempVarId++) + "]", varType, ctx->getStart()->getLine(), constVal);
@@ -660,7 +661,7 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 
 			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 			// can be usefull for looking at what instructions are happening
-			if (!m_Cfg.GetOptimized())
+			if (!compilerFlags::g_OptimizeConstPropagation)
 				m_Cfg.CurrentBB()->AddInstr(new Operation::WriteConst(resultTemp, std::to_string(value), scope));
 
 			break;
@@ -679,7 +680,7 @@ std::any CodeVisitor::visitConstExpr(antlrcpp::CricketParser::ConstExprContext* 
 
 			// If optimazations are turned off add an instruction for loading the literal otherwise this is not really needed
 			// can be usefull for looking at what instructions are happening
-			if (!m_Cfg.GetOptimized())
+			if (!compilerFlags::g_OptimizeConstPropagation)
 				m_Cfg.CurrentBB()->AddInstr(new Operation::WriteConst(resultTemp, std::to_string(charLiteralValue), scope));
 
 			break;

@@ -867,7 +867,7 @@ namespace Operation
 		void GenerateASM(std::ostream& o) override;
 
 	private:
-		const Symbol* m_ConditionSym;
+		Symbol* m_ConditionSym;
 		const std::string m_ExitTrueLabel;
 		const std::string m_ExitFalseLabel;
 	};

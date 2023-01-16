@@ -136,7 +136,7 @@ void Scope::CheckUnusedSymbolsAndResetIsUsed(ErrorLogger& errorLogger)
             errorLogger.Signal(WARNING, message, symbol.varLine);
         }
 
-
+        symbol.isUsed = false;
     }
 }
 

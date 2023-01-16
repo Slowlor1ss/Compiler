@@ -4,6 +4,7 @@
 #include "ControlFlowGraph.h"
 #include "Instruction.h"
 #include "../Scope.h"
+#include "../CompilerFlags.hpp"
 
 BasicBlock::BasicBlock(ControlFlowGraph* cfg, std::string label, Function* fn)
 	: m_CFG(cfg)
@@ -48,7 +49,7 @@ void BasicBlock::AddInstr(Instruction* instr)
 
 void BasicBlock::OptimizeIR()
 {
-	if constexpr (g_OptimizeConstPropagation)
+	if (compilerFlags::g_OptimizeConstPropagation)
 	{
 		//compute in set
 		ComputeInSet(m_Entries);
@@ -94,7 +95,7 @@ void BasicBlock::GenerateX86(std::ostream& o)
 	}
 	for (auto* instr : m_Instructions)
 	{
-		if (instr->GetIsUsed())
+		if (!compilerFlags::g_RemoveDeadcode || instr->GetIsUsed())
 			instr->GenerateASM(o);
 	}
 }
@@ -107,7 +108,7 @@ void BasicBlock::ReplaceInstruction(Instruction* oldInst, Instruction* newInst)
 
 std::optional<int> BasicBlock::GetConst(const Symbol* sym)
 {
-	if constexpr (g_RemoveDeadcode)
+	if (compilerFlags::g_RemoveDeadcode)
 	{
 		if (const auto it = m_ConstTable.find(sym->varName); it != m_ConstTable.end()) {
 			return it->second.GetValue(sym->varName);

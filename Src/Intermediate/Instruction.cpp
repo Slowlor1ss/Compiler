@@ -143,12 +143,12 @@ void Operation::WriteParam::DeadCodeElimination(bool allowSetUnused)
 	if(!m_Function->isCalled)
 		return;
 
-	
-	if (m_Function->scope->GetSymbol(m_Function->parameterNames[m_ParamIdx])->isUsed)
-	{
+	// Great idea and would work normally but potential that function hasn't been checked yet and thus isUsed will always be false
+	//if (m_Function->scope->GetSymbol(m_Function->parameterNames[m_ParamIdx])->isUsed)
+	//{
 		m_IsUsed = true;
 		m_Sym->isUsed = true;
-	}
+	//}
 }
 
 void Operation::WriteParam::GenerateASM(std::ostream& o)
@@ -882,6 +882,8 @@ bool Operation::CompoundAssignment::PropagateCompoundConst(const std::function<i
 			auto* constInstr = new Operation::WriteConst(m_LhsSym, std::to_string(res), m_Scope);
 			m_BasicBlock->AddAndUpdateConst(m_LhsSym, res, constInstr);
 			m_BasicBlock->ReplaceInstruction(this, constInstr);
+
+			return false;
 		//}
 		//else
 		//	return true;
@@ -1099,7 +1101,7 @@ bool Operation::ConditionalJump::PropagateConst()
 {
 	if (m_BasicBlock->GetConst(m_ConditionSym).has_value())
 	{
-		if constexpr (g_RemoveConstConditionals)
+		if (compilerFlags::g_RemoveConstConditionals)
 		{
 			if (m_ConditionSym->constVal.value() == 0)
 			{
@@ -1131,6 +1133,7 @@ bool Operation::ConditionalJump::PropagateConst()
 void Operation::ConditionalJump::DeadCodeElimination(bool allowSetUnused)
 {
 	m_IsUsed = true;
+	m_ConditionSym->isUsed = true;
 	//TODO: maybe check if basic block is not used and then change to unconditional jump
 }
 
@@ -1215,7 +1218,7 @@ std::string Instruction::FormatInstruction(std::string instr)
 
 void Instruction::AddCommentToPrevInstruction(std::ostream& o, const std::string& comment)
 {
-	if constexpr (g_AddComents)
+	if (compilerFlags::g_AddComents)
 	{
 		//remove /n to place comment on same line
 		o.seekp(-1, std::ostream::cur);

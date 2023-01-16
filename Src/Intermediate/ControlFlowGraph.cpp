@@ -10,6 +10,7 @@
 #include <support/CPPUtils.h>
 #include "Instruction.h"
 #include "../SymbolTable.h"
+#include "../CompilerFlags.hpp"
 
 ControlFlowGraph::ControlFlowGraph(bool optimized)
 	: m_Optimized(optimized)
@@ -68,9 +69,12 @@ void ControlFlowGraph::GenerateX86(std::stringstream& ss)
 		}
 	}
 
-	for (const auto& m_BasicBlock : std::ranges::reverse_view(m_BasicBlocks))
+	if(compilerFlags::g_RemoveDeadcode)
 	{
-		m_BasicBlock->DCE(true);
+		for (const auto& m_BasicBlock : std::ranges::reverse_view(m_BasicBlocks))
+		{
+			m_BasicBlock->DCE(true);
+		}
 	}
 	//for (const auto & basicBlock : m_BasicBlocks)
 	//{
@@ -87,9 +91,9 @@ void ControlFlowGraph::GenerateX86(std::stringstream& ss)
 		bb->GenerateX86(ss);
 	}
 
-	if (g_OptimizeASM)
+	if (compilerFlags::g_PeepholeOptimization)
 	{
-		OptimizeASM(ss);
+		PeepholeOptimization(ss);
 	}
 }
 
@@ -99,7 +103,7 @@ void ControlFlowGraph::SetSymbolTable(SymbolTable* st)
 }
 
 //TODO:!!! clean up put in to functions
-void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
+void ControlFlowGraph::PeepholeOptimization(std::stringstream& ss)
 {
 	//TODO: finish
 	std::vector<std::string> outputLines;
@@ -157,7 +161,7 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 		if (params.size() > 1)
 		{
 			// Remove temp vars
-			if constexpr  (g_RemoveTempVars)
+			if (compilerFlags::g_RemoveTempVars)
 			{
 			//NOTE!: this is an extremely bad way of doing this but due to the need of a very big design change for proper register allocation
 			//		 and a lack of time I will for now leave it with a wacky implementation of conservative spilling
@@ -169,7 +173,7 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 					{
 						line = ReplaceString(line, param, spillMap[param]);
 
-						if constexpr (g_AddComents)
+						if (compilerFlags::g_AddComents)
 						{
 						//Update comment
 						std::vector<std::string> lineComment = Split(line, "#");
@@ -198,7 +202,7 @@ void ControlFlowGraph::OptimizeASM(std::stringstream& ss)
 					spillMap[prevDest] = spillSym->GetOffsetReg();
 					std::string correctedPrevLine = ReplaceString(outputLines.back(), prevDest, spillSym->GetOffsetReg());
 					//Update comment
-					if constexpr (g_AddComents)
+					if (compilerFlags::g_AddComents)
 					{
 					//Update comment
 					std::vector<std::string> lineComment = Split(correctedPrevLine, "#");

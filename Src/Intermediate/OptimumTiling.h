@@ -1,9 +1,11 @@
+#pragma once
 #include <functional>
 #include <optional>
 #include "Instruction.h"
 #include "../Scope.h"
 #include <cassert>
 #include "ControlFlowGraph.h"
+#include "../CompilerFlags.hpp"
 
 struct Symbol;
 
@@ -127,7 +129,7 @@ namespace InstrSelection
 
 		std::string OPToString(PatternOp op)
 		{
-			if constexpr (g_AddComents)
+			if (compilerFlags::g_AddComents)
 			{
 				switch (op) {
 				case plus: return "plus";

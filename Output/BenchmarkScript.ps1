@@ -1,4 +1,8 @@
-﻿$location = "C:/School_3rdyr/Gradwork/Project/Compiler/Output/"
+﻿param(
+    [string]$arch = "SKL"
+)
+
+$location = "C:/School_3rdyr/Gradwork/Project/Compiler/Output/"
 $codeFile = $location + "out.s"
 $markerFile = $location + "outWMarkers.s"
 $outFile = $location + "outCompiled.exe"
@@ -15,4 +19,4 @@ $content | Set-Content -Path $markerFile
 
 $iacaFile = $location + "iaca.exe"
 #echo $iacaFile
-& $iacaFile "-reduceout" $outFile > ($location + "BenchmarkResult.txt")
+& $iacaFile -arch $arch $outFile > ($location + "BenchmarkResult.txt")

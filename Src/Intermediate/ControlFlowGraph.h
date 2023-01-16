@@ -26,7 +26,7 @@ public:
 	void SetSymbolTable(SymbolTable* st);
 
 private:
-	void OptimizeASM(std::stringstream& ss);
+	void PeepholeOptimization(std::stringstream& ss);
 	std::vector<std::string> Split(const std::string& s, const std::string& sep);
 	[[nodiscard]] std::string ReplaceString(const std::string& s, const std::string& from, const std::string& to);
 
@@ -38,10 +38,9 @@ private:
 };
 
 //TODO: remove these globals and make some settings
-constexpr bool g_ConstPropagationAssignment{ false };
-constexpr bool g_OptimizeConstPropagation{ true };
-constexpr bool g_RemoveDeadcode{ true };
-constexpr bool g_RemoveConstConditionals{ true };
-constexpr bool g_OptimizeASM{ true };
-constexpr bool g_RemoveTempVars{ true && g_OptimizeASM };
-constexpr bool g_AddComents{ true };
+//constexpr bool g_OptimizeConstPropagation{ true };
+//constexpr bool g_RemoveDeadcode{ true };
+//constexpr bool g_RemoveConstConditionals{ false };
+//constexpr bool g_OptimizeASM{ true };
+//constexpr bool g_RemoveTempVars{ true && g_OptimizeASM };
+//constexpr bool g_AddComents{ true };

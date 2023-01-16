@@ -51,10 +51,12 @@ include_directories(${ANTLR_CricketGrammar_OUTPUT_DIR})
 file(GLOB compiler_SRC_General CONFIGURE_DEPENDS
      "Src/*.h"
      "Src/*.cpp"
+     "Src/*.hpp"
 )
 file(GLOB compiler_SRC_Intermediate CONFIGURE_DEPENDS
      "Src/Intermediate/*.h"
      "Src/Intermediate/*.cpp"
+     "Src/Intermediate/*.hpp"
 )
 
 # add generated grammar to compiler binary target

@@ -2,6 +2,7 @@
 #include <filesystem>
 
 #include "antlr4-runtime.h"
+#include "CompilerFlags.hpp"
 #include "CricketLexer.h"
 #include "CricketParser.h"
 
@@ -13,16 +14,27 @@
 using namespace antlrcpp;
 using namespace antlr4;
 
+// Gross globals I know
 char* g_Optarg;
 int g_Optind = 1, g_Opterr = 1, g_Optopt, g_Optpos, g_Optreset = 0;
 int getopt(int argc, char* const argv[], const char* optstring);
+void handleCompilerFlag(const std::string& flag, bool state, std::string& errorlog);
+void setAllFlags(bool state);
+
+void exitFailure(std::ostream &file)
+{
+	file << "Comilation Errors -> see errorlog.txt";
+	exit(EXIT_FAILURE);
+}
 
 int main(int argc, char* argv[])
 {
 	std::string inFilepath;
 	std::string outFilepath;
+	std::string errorFilepath{};// = (std::filesystem::current_path() / "Errorlog.txt").string();
+	std::string savedErrors{};
 	int c;
-	while ((c = getopt(argc, argv, "i:o:")) != -1) {
+	while ((c = getopt(argc, argv, "i:o:O:f:n:e:")) != -1) {
 		switch (c)
 		{
 		case 'i':
@@ -33,16 +45,40 @@ int main(int argc, char* argv[])
 			outFilepath = (std::filesystem::current_path() / g_Optarg).string();
 			std::cout << "Output file: " << outFilepath << std::endl;
 			break;
+		case 'f':
+			handleCompilerFlag(g_Optarg, true, savedErrors);
+			break;
+		case 'n':
+			handleCompilerFlag(g_Optarg, false, savedErrors);
+			break;
+		case 'e':
+			errorFilepath = (std::filesystem::current_path() / g_Optarg).string();
+			std::cout << "Error output file: " << errorFilepath << std::endl;
+			break;
+		case 'O':
+			if (g_Optarg[0] == '0')
+				setAllFlags(false);
+			else
+				setAllFlags(true);
+			break;
 		case '?':
-			std::cerr << "Error: invalid option" << std::endl;
-			return EXIT_FAILURE;
+			savedErrors += "Error: invalid compiler flag option\n";
+			break;
 		case ':':
-			std::cerr << "Error: missing argument" << std::endl;
-			return EXIT_FAILURE;
+			savedErrors += "Error: missing compiler flag argument\n";
+			break;
 		default: 
-			std::cerr << "Error: Unknown" << std::endl;
+			savedErrors += "Error: Unknown compiler flag\n";
+			break;
 		}
 	}
+
+	std::ofstream file(outFilepath, std::ios::out | std::ios::trunc);
+	if (!errorFilepath.empty())
+	{
+		freopen(errorFilepath.c_str(), "w", stderr);
+	}
+	std::cerr << savedErrors + " argc: " + std::to_string(argc);
 
 	// Open the input file
 	std::ifstream inFile(inFilepath);
@@ -90,32 +126,33 @@ int main(int argc, char* argv[])
 		if (parser.getNumberOfSyntaxErrors() != 0)
 		{
 			std::cerr << "ERROR: syntax error(s) while parsing\n";
-			exit( EXIT_FAILURE);
+			exitFailure(file);
 		}
 		if (lexer.getNumberOfSyntaxErrors() != 0)
 		{
 			std::cerr << "ERROR: syntax error(s) while scanning\n";
-			exit(EXIT_FAILURE);
+			exitFailure(file);
 		}
 
 		CodeVisitor codeVisitor{ errorLogger, controlFlowGraph };
 		codeVisitor.visit(tree);
 		//Check for errors after visiting the code
 		if (errorLogger.HasError())
-			exit(EXIT_FAILURE);
+		{
+			exitFailure(file);
+		}
 
 		std::stringstream stream;
 		controlFlowGraph.GenerateX86(stream);
 
-		std::ofstream file(outFilepath, std::ios::out | std::ios::trunc);
-
 		if (!file)
 		{
 			std::cerr << "Couldn't open file" << '\n';
-			return EXIT_FAILURE;
+			exitFailure(file);
 		}
 
-		file << stream.rdbuf();
+
+	file << stream.rdbuf();
 
 		//std::cout << tree->toStringTree(&parser, true) << std::endl;
 	//}
@@ -125,6 +162,47 @@ int main(int argc, char* argv[])
 	//}
 
 	return 0;
+}
+
+void handleCompilerFlag(const std::string& flag, bool state, std::string& errorlog)
+{
+	if (flag == "verbose-asm")
+	{
+		compilerFlags::g_AddComents = state;
+	}
+	else if (flag == "peephole")
+	{
+		compilerFlags::g_PeepholeOptimization = state;
+	}
+	else if (flag == "regalloc")
+	{
+		compilerFlags::g_RemoveTempVars = state;
+		if (state)
+			compilerFlags::g_PeepholeOptimization = state;
+	}
+	else if (flag == "dce")
+	{
+		compilerFlags::g_RemoveDeadcode = state;
+		compilerFlags::g_RemoveConstConditionals = state;
+	}
+	else if (flag == "cprop")
+	{
+		compilerFlags::g_OptimizeConstPropagation = state;
+	}
+	else
+	{
+		errorlog += "Warning: Unknown flag " + flag;
+	}
+}
+
+void setAllFlags(bool state)
+{
+	//compilerFlags::g_AddComents = state;
+	compilerFlags::g_PeepholeOptimization = state;
+	compilerFlags::g_RemoveTempVars = state;
+	compilerFlags::g_RemoveDeadcode = state;
+	compilerFlags::g_RemoveConstConditionals = state;
+	compilerFlags::g_OptimizeConstPropagation = state;
 }
 
 // Implementation of the unix getopt function from https://gist.github.com/attractivechaos/a574727fb687109a2adefcd75655d9ea
