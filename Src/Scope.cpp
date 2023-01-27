@@ -130,11 +130,11 @@ void Scope::CheckUnusedSymbolsAndResetIsUsed(ErrorLogger& errorLogger)
 {
     for (auto& [symbolName, symbol] : m_SymbolMap)
     {
-        if (!symbol.isUsed) 
-        {
-	        std::string message = "Unused parameter \"" + symbolName + "\" at line " + std::to_string(symbol.varLine);
-            errorLogger.Signal(WARNING, message, symbol.varLine);
-        }
+        //if (!symbol.isUsed) 
+        //{
+	       // std::string message = "Unused parameter \"" + symbolName + "\" at line " + std::to_string(symbol.varLine);
+        //    errorLogger.Signal(WARNING, message, symbol.varLine);
+        //}
 
         symbol.isUsed = false;
     }

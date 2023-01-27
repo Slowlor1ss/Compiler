@@ -64,7 +64,7 @@ main:
 		movl	$0, -4(%rbp)		#[WriteConst] move 0 into i
 .B8:
 		movl	-4(%rbp), %eax		#[LessThan] move i into EAX
-		movl	$5, %edx		#[LessThan] move [Temp_15] into EDX
+		movl	$10, %edx		#[LessThan] move [Temp_15] into EDX
 		cmpl	%edx, %eax		#[LessThan] compaire values
 		setl	%al		#[LessThan] set flag LessThan
 		cmpb	$0, %al		#[ConditionalJump] check if condition is true or false

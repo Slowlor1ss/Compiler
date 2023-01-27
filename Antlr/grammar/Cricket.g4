@@ -6,7 +6,7 @@ start : prog EOF;
 vartype: TInt | TChar ;
 beginBlock : '{' ;
 endBlock : '}' ;
-
+//	(declr StatementSeparator|funcDeclr)* mainDeclr (funcDeclr)*
 prog :
 	(funcDeclr)* mainDeclr (funcDeclr)*
 ;

@@ -12,8 +12,7 @@
 #include "../SymbolTable.h"
 #include "../CompilerFlags.hpp"
 
-ControlFlowGraph::ControlFlowGraph(bool optimized)
-	: m_Optimized(optimized)
+ControlFlowGraph::ControlFlowGraph()
 {
 }
 
@@ -139,7 +138,7 @@ void ControlFlowGraph::PeepholeOptimization(std::stringstream& ss)
 				else
 					prevDest = "";
 			}
-			else
+			else if(compilerFlags::g_RemoveTempVars)
 			{
 				// If it has a : its a label and if it didn't start with a . its not a basic block so must be a function
 				std::string::size_type pos = args[0].find(':');
@@ -273,6 +272,8 @@ void ControlFlowGraph::PeepholeOptimization(std::stringstream& ss)
 				}
 			}
 
+			if (compilerFlags::g_RemoveTempVars)
+			{
 			if (currInstr == "subq")
 			{
 				if (params[1] == "%rbp")
@@ -280,6 +281,7 @@ void ControlFlowGraph::PeepholeOptimization(std::stringstream& ss)
 					funcStackPrologueIdx = outputLines.size();
 					prevStackSize = params[0];
 				}
+			}
 			}
 
 			prevSrc = params[0];

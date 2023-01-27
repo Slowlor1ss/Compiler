@@ -25,6 +25,12 @@ CodeVisitor::CodeVisitor(ErrorLogger& errorHandeler, ControlFlowGraph& cfg)
 std::any CodeVisitor::visitProg(antlrcpp::CricketParser::ProgContext* ctx)
 {
 	const size_t numOfFunctions = ctx->funcDeclr().size();
+	//const size_t numOfGlobals = ctx->declr().size();
+	//auto* globlFunc = m_GlobalScope->AddFunc("global_", "void", 0, {}, {}, 0);
+	//m_Cfg.CreateNewCurrBB(globlFunc);
+	//for (size_t i = 0; i < numOfGlobals; ++i) {
+	//	visit(ctx->declr(i));
+	//}
 
 	//go over all the function
 	for (size_t i = 0; i < numOfFunctions; ++i) {
@@ -148,6 +154,7 @@ std::any CodeVisitor::visitMainDeclr(antlrcpp::CricketParser::MainDeclrContext* 
 
 	// Returns the scope that was newly created in visitBeginBlock()
 	Scope* newSymbolTable = std::any_cast<Scope*>(visit(ctx->beginBlock()));
+	headerFunc->scope = newSymbolTable;
 
 	m_Cfg.CurrentBB()->AddInstr(new Operation::Prologue(newSymbolTable));
 

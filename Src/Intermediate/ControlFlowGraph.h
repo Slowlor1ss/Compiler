@@ -9,7 +9,7 @@ class BasicBlock;
 class ControlFlowGraph
 {
 public:
-	ControlFlowGraph(bool optimized = false);
+	ControlFlowGraph();
 	~ControlFlowGraph();
 
 	BasicBlock* CreateNewCurrBB(Function* fn);
@@ -17,8 +17,6 @@ public:
 
 	void RemoveBasicBlock(std::string label);
 
-	bool GetOptimized() const { return m_Optimized; }
-	void SetOptimized(bool o) { m_Optimized = o; }
 	BasicBlock* CurrentBB() const { return m_CurrentBB; }
 	void SetCurrentBB(BasicBlock* bb) { m_CurrentBB = bb; }
 	void GenerateX86(std::stringstream& ss);
@@ -36,11 +34,3 @@ private:
 	BasicBlock* m_CurrentBB{};
 	SymbolTable* m_GlobalSymbolTable{};
 };
-
-//TODO: remove these globals and make some settings
-//constexpr bool g_OptimizeConstPropagation{ true };
-//constexpr bool g_RemoveDeadcode{ true };
-//constexpr bool g_RemoveConstConditionals{ false };
-//constexpr bool g_OptimizeASM{ true };
-//constexpr bool g_RemoveTempVars{ true && g_OptimizeASM };
-//constexpr bool g_AddComents{ true };

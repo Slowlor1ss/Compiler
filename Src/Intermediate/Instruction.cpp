@@ -60,7 +60,7 @@ bool Operation::Return::PropagateConst()
 void Operation::Return::DeadCodeElimination(bool allowSetUnused)
 {
 	// Check if its returning a symbol
-	if (!m_ConstVal.has_value())
+	if (m_ReturnParam != nullptr && !m_ConstVal.has_value())
 	{
 		m_ReturnParam->isUsed = true;
 	}
@@ -563,7 +563,8 @@ void Operation::Div::GenerateASM(std::ostream& o)
 	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
 	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
-	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	//TODO: look in to this rhs cant be a value and has to be a register or memory
+	std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 
 	o << FormatInstruction(movInstr1, lhs, "%eax");									AddCommentToPrevInstruction(o, "[Div] move " + m_LhsSym->varName + " into EAX");
 
@@ -575,8 +576,14 @@ void Operation::Div::GenerateASM(std::ostream& o)
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", "%ecx");										AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
 	}
-	else
+	else 
 	{
+		if (rhs[0] == '$') // Can't do idivl on a value
+		{
+			o << FormatInstruction("movl", rhs, "%ecx");					AddCommentToPrevInstruction(o, "[Div] move " + m_RhsSym->varName + " into ECX");
+			rhs = "%ecx";
+		}
+
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[Div] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", rhs);										AddCommentToPrevInstruction(o, "[Div] divide and store result in to EDX:EAX");
 	}
@@ -614,7 +621,8 @@ void Operation::Mod::GenerateASM(std::ostream& o)
 	const std::string movInstr1 = m_LhsSym->varType == "char" ? "movsbl" : "movl";
 
 	const std::string lhs = (m_ConstVal.has_value() && m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_LhsSym->GetOffsetReg();
-	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	//TODO: same here as in div cant idivl on a const value
+	std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 
 	o << FormatInstruction(movInstr1, lhs, "%eax");				AddCommentToPrevInstruction(o, "[Mod] move " + m_LhsSym->varName + " into EAX");
 
@@ -628,6 +636,11 @@ void Operation::Mod::GenerateASM(std::ostream& o)
 	}
 	else
 	{
+		if (rhs[0] == '$') // Can't do idivl on a value
+		{
+			o << FormatInstruction("movl", rhs, "%ecx");					AddCommentToPrevInstruction(o, "[Div] move " + m_RhsSym->varName + " into ECX");
+			rhs = "%ecx";
+		}
 		o << FormatInstruction("cltd");								AddCommentToPrevInstruction(o, "[Mod] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", rhs);					AddCommentToPrevInstruction(o, "[Mod] divide and store result in to EDX:EAX");
 	}
@@ -1069,8 +1082,8 @@ void Operation::DivEqual::GenerateASM(std::ostream& o)
 
 	// How "cltd" works and why im not using EDX for rhsSym
 	// https://stackoverflow.com/questions/17170388/trying-to-understand-the-assembly-instruction-cltd-on-x86
-
-	const std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
+	// TODO: same here as in mod and div can't idivl on a const number
+	std::string rhs = (m_ConstVal.has_value() && !m_LhsIsConst) ? '$' + std::to_string(m_ConstVal.value()) : m_RhsSym->GetOffsetReg();
 	if (m_RhsSym->varType == "char")
 	{
 		o << FormatInstruction("movsbl", rhs, "%ecx");						AddCommentToPrevInstruction(o, "[DivEqual] move " + m_RhsSym->varName + " into ECX");
@@ -1079,6 +1092,11 @@ void Operation::DivEqual::GenerateASM(std::ostream& o)
 	}
 	else
 	{
+		if (rhs[0] == '$') // Can't do idivl on a value
+		{
+			o << FormatInstruction("movl", rhs, "%ecx");					AddCommentToPrevInstruction(o, "[Div] move " + m_RhsSym->varName + " into ECX");
+			rhs = "%ecx";
+		}
 		o << FormatInstruction("cltd");													AddCommentToPrevInstruction(o, "[DivEqual] sign-extends EAX into EDX:EAX");
 		o << FormatInstruction("idivl", rhs);										AddCommentToPrevInstruction(o, "[DivEqual] divide and store result in to EDX:EAX");
 	}

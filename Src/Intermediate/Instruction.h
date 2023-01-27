@@ -9,6 +9,7 @@
 #include <vector>
 #include "../Scope.h"
 #include <variant>
+#include "../CompilerFlags.hpp"
 
 struct Symbol;
 class BasicBlock;
@@ -152,7 +153,11 @@ namespace Operation
 
 		Return(Symbol* returnParam, Scope* scope)
 			: Instruction(scope, InstructionTag::Return), m_ReturnParam(returnParam)
-		{}
+		{
+			// prevent things like return 0 from writing return temp when -fregalloc is on and -fcprop is off
+			if(!compilerFlags::g_OptimizeConstPropagation && compilerFlags::g_RemoveTempVars)
+				m_ConstVal = m_ReturnParam->constVal;
+		}
 
 		bool PropagateConst() override;
 		void GenerateASM(std::ostream& o) override;
@@ -268,7 +273,7 @@ namespace Operation
 			, m_SourceSym(sourceSym)
 		{}
 
-		~Assign() override { std::cout << "Destructor called"; }
+		~Assign() override { /*std::cout << "Destructor called";*/ }
 
 		bool PropagateConst() override;
 		void DeadCodeElimination(bool allowSetUnused) override;
