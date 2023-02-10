@@ -5,7 +5,25 @@ This Github reposetory is part of my graduation work at Digital Arts and Enterta
 
 ## Features
 
+Some of the implemented optimizations include:
+-Dead Code Elimination
+-Constant Propagation
+-Instruction Selection
+-Register Allocation
+-Peephole Optimization
+How each one of these have been implemented and what algortihm was used is described in detail inside of the paper.
 
+Compiler flags:
+-O1 		[turn on all optimization flags]
+-O0 		[turn of all optimization flags]
+-i 		[specify input file]
+-o 		[specify output file]
+-fcprop 	[const propagation]
+-fdce		[dead code elimination]
+-fverbose-asm	[added comments to the generated assembly code]
+-fregalloc 	[naive register allocation]
+-fpeephole 	[peephole optimizations]
+-e		[specify a error log file (if not specified will be printed to console)]
 
 ## Demo Showcase
 
