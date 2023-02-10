@@ -4,27 +4,26 @@ This Github reposetory is part of my graduation work at Digital Arts and Enterta
 [Here](ResearchPaper.pdf) you can find a like to the reserach paper that was written as part of the gradwork reasearching the impact of different optimization techniques in a compiler.
 
 ## Features
-
-Some of the implemented optimizations include:
--Dead Code Elimination
--Constant Propagation
--Instruction Selection
--Register Allocation
--Peephole Optimization
+Some of the implemented optimizations include:  
+ -Dead Code Elimination  
+ -Constant Propagation  
+ -Instruction Selection  
+ -Register Allocation  
+ -Peephole Optimization  
 How each one of these have been implemented and what algortihm was used is described in detail inside of the paper.
-
-Compiler flags:
--O1 		[turn on all optimization flags]
--O0 		[turn of all optimization flags]
--i 		[specify input file]
--o 		[specify output file]
--fcprop 	[const propagation]
--fdce		[dead code elimination]
--fverbose-asm	[added comments to the generated assembly code]
--fregalloc 	[naive register allocation]
--fpeephole 	[peephole optimizations]
--e		[specify a error log file (if not specified will be printed to console)]
-
+```
+Compiler flags:  
+ -O1           [turn on all optimization flags]  
+ -O0           [turn of all optimization flags]  
+ -i            [specify input file]  
+ -o            [specify output file]  
+ -fcprop       [const propagation]  
+ -fdce         [dead code elimination]  
+ -fverbose-asm [added comments to the generated assembly code]  
+ -fregalloc    [naive register allocation]  
+ -fpeephole    [peephole optimizations]  
+ -e            [specify a error log file (if not specified will be printed to console)]  
+```
 ## Demo Showcase
 
 To test and demonstarte the project I have also set up a small [Godbolt](https://godbolt.org/) like website, for this is used some simple html, CSS, JS, PHP, and some powershell scripts to run the project and added features.
