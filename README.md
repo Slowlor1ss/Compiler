@@ -4,12 +4,14 @@ This Github reposetory is part of my graduation work at Digital Arts and Enterta
 [Here](ResearchPaper.pdf) you can find a like to the reserach paper that was written as part of the gradwork reasearching the impact of different optimization techniques in a compiler.
 
 ## Features
+```
 Some of the implemented optimizations include:  
  -Dead Code Elimination  
  -Constant Propagation  
  -Instruction Selection  
  -Register Allocation  
  -Peephole Optimization  
+```
 How each one of these have been implemented and what algortihm was used is described in detail inside of the paper.
 ```
 Compiler flags:  
