@@ -28,7 +28,7 @@ Compiler flags:
 ```
 ## Demo Showcase
 
-To test and demonstarte the project I have also set up a small [Godbolt](https://godbolt.org/) like website, for this is used some simple html, CSS, JS, PHP, and some powershell scripts to run the project and added features.
+To test and demonstarte the project I have also set up a small <a href="https://godbolt.org/" target="_blank">Godbolt</a> like website, for this is used some simple html, CSS, JS, PHP, and some powershell scripts to run the project and added features.
 
 ## About
 
